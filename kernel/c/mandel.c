@@ -6,6 +6,8 @@
 static unsigned compute_one_pixel (int i, int j);
 static void zoom (void);
 
+//hello pap
+
 ///////////////////////////// Simple sequential version (seq)
 // Suggested cmdline:
 // ./run --kernel mandel
