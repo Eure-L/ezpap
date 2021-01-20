@@ -105,7 +105,8 @@ void tsp_seq(int etape, int lg, chemin_t chemin, int mask)
 {
   int ici, dist;
 
-  if (etape == nbVilles)
+  if (lg < minimum && etape == nbVilles)
+    #pragma omp critical
     verifier_minimum(lg, chemin);
   else
   {
@@ -127,7 +128,7 @@ void tsp_ompfor(int etape, int lg, chemin_t chemin, int mask)
 {
   int ici, dist;
 
-  if (etape == nbVilles){
+  if (lg < minimum && etape == nbVilles){
     #pragma omp critical
     verifier_minimum(lg, chemin);
   }
@@ -135,17 +136,31 @@ void tsp_ompfor(int etape, int lg, chemin_t chemin, int mask)
   {
     ici = chemin[etape - 1];
 
-    #pragma omp parallel for if (etape <= grain) firstprivate(mask,etape,ici) shared(chemin)
-    for (int i = 1; i < nbVilles; i++)
-    {
-      if (!present(i, mask))
+    if (etape > grain){
+      for (int i = 1; i < nbVilles; i++)
       {
-        int new_chemin [MAX_NBVILLES];
-        memcpy(new_chemin,chemin,MAX_NBVILLES*sizeof(int));
-        new_chemin[etape] = i;
-        dist = distance[ici][i];
-        
-        tsp_ompfor(etape + 1, lg + dist, new_chemin, mask | (1 << i));
+        if (!present(i, mask))
+        {
+          int new_chemin [MAX_NBVILLES];
+          memcpy(new_chemin,chemin,MAX_NBVILLES*sizeof(int));
+          new_chemin[etape] = i;
+          dist = distance[ici][i];      
+          tsp_seq(etape + 1, lg + dist, new_chemin, mask | (1 << i));
+        }
+      }
+    }
+    else{
+      #pragma omp parallel for if (etape <= grain) firstprivate(mask,etape,ici) //shared(chemin)
+      for (int i = 1; i < nbVilles; i++)
+      {
+        if (!present(i, mask))
+        {
+          int new_chemin [MAX_NBVILLES];
+          memcpy(new_chemin,chemin,MAX_NBVILLES*sizeof(int));
+          new_chemin[etape] = i;
+          dist = distance[ici][i];      
+          tsp_ompfor(etape + 1, lg + dist, new_chemin, mask | (1 << i));
+        }
       }
     }
   }
@@ -162,7 +177,7 @@ int main(int argc, char **argv)
 
   printf("nbVilles = %3d - grain %d \n", nbVilles, grain);
 
-  //omp_set_max_active_levels(grain);
+  omp_set_max_active_levels(grain);
 
   gettimeofday(&t1, NULL);
 
