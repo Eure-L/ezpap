@@ -4,6 +4,7 @@
 #include <math.h>
 #include <limits.h>
 #include <sys/time.h>
+#include "collapse.h"
 
 // #include <omp.h>
 
@@ -104,8 +105,9 @@ void verifier_minimum(int lg, chemin_t chemin)
 void tsp_seq(int etape, int lg, chemin_t chemin, int mask)
 {
   int ici, dist;
-
-  if (lg < minimum && etape == nbVilles)
+  if(lg +  distance[0][chemin[etape-1]]>= minimum)
+    return;
+  if (etape == nbVilles)
     #pragma omp critical
     verifier_minimum(lg, chemin);
   else
@@ -126,9 +128,10 @@ void tsp_seq(int etape, int lg, chemin_t chemin, int mask)
 
 void tsp_ompfor(int etape, int lg, chemin_t chemin, int mask)
 {
+  if(lg +  distance[0][chemin[etape-1]]>= minimum)
+    return;
   int ici, dist;
-
-  if (lg < minimum && etape == nbVilles){
+  if ( etape == nbVilles){
     #pragma omp critical
     verifier_minimum(lg, chemin);
   }
@@ -166,9 +169,69 @@ void tsp_ompfor(int etape, int lg, chemin_t chemin, int mask)
   }
 }
 
+
+void tsp_ompcol4()
+{
+  int i,j,k;
+#pragma omp parallel for collapse(4) schedule(runtime)
+ for (i=1; i < nbVilles; i++)
+   for(j=1; j < nbVilles; j++)
+     for(k=1; k < nbVilles; k++)
+        for(int l=1; l < nbVilles; l++)
+	  if(i != j && i != k && j != k && i != l && j != l && k != l)
+	    {
+	      chemin_t chemin;
+	      chemin[0] = 0;
+	      chemin[1] = i;
+	      chemin[2] = j;
+	      chemin[3] = k;
+	      chemin[4] = l;
+	      int dist = distance[0][i] + distance[i][j] + distance[j][k] + distance[k][l];
+	      tsp_ompfor (5, dist, chemin,  1 | (1<<i) | (1<<j) | (1<<k) | (1<<l)) ;
+         }
+}
+
+void tsp_ompcol3()
+{
+  int i,j,k;
+#pragma omp parallel for collapse(3) schedule(runtime)
+ for (i=1; i < nbVilles; i++)
+   for(j=1; j < nbVilles; j++)
+     for(k=1; k < nbVilles; k++)
+       if(i != j && i != k && j != k)
+         {
+          chemin_t chemin;
+          chemin[0] = 0;
+          chemin[1] = i;
+          chemin[2] = j;
+          chemin[3] = k;
+          int dist = distance[0][i] + distance[i][j] + distance[j][k];
+          tsp_ompfor (4, dist, chemin,  1 | (1<<i) | (1<<j) | (1<<k)) ;
+         }
+}
+
+void tsp_ompcol2()
+{
+  int i,j;
+#pragma omp parallel for collapse(2) schedule(runtime)
+ for (i=1; i < nbVilles; i++)
+   for(j=1; j < nbVilles; j++)
+     if(i != j)
+         {
+          chemin_t chemin;
+          chemin[0] = 0;
+          chemin[1] = i;
+          chemin[2] = j;
+          int dist = distance[0][i] + distance[i][j];
+          tsp_ompfor (3, dist, chemin,  1 | (1<<i) | (1<<j) );
+         }
+}
+
+
 int main(int argc, char **argv)
 {
   omp_set_nested(1);
+  omp_set_max_active_levels(16);
   unsigned long temps;
   struct timeval t1, t2;
   chemin_t chemin;
@@ -186,8 +249,13 @@ int main(int argc, char **argv)
   if (!strcmp(argv[argc-1],"seq")) 
     tsp_seq(1, 0, chemin, 1);
   else if (!strcmp(argv[argc-1],"ompfor")) 
-    //#pragma omp parallel for num_threads(nbVilles) lastprivate(chemin)
     tsp_ompfor(1, 0, chemin, 1);
+  else if (!strcmp(argv[argc-1],"ompcol2")) 
+    tsp_ompcol2(1, 0, chemin, 1);
+  else if (!strcmp(argv[argc-1],"ompcol3")) 
+    tsp_ompcol3(1, 0, chemin, 1);
+  else if (!strcmp(argv[argc-1],"ompcol4")) 
+    tsp_ompcol4(1, 0, chemin, 1);
   else
   {
       printf("kernel inconnu\n");
