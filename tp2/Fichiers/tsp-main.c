@@ -127,8 +127,8 @@ void tsp_seq(int etape, int lg, chemin_t chemin, int mask)
 
 void tsp_ompfor(int etape, int lg, chemin_t chemin, int mask)
 {
-  // if(lg +  distance[0][chemin[etape-1]]>= minimum)
-  //   return;
+  if(lg +  distance[0][chemin[etape-1]]>= minimum)
+    return;
   int ici, dist;
   if ( etape == nbVilles){
     #pragma omp critical
@@ -143,11 +143,15 @@ void tsp_ompfor(int etape, int lg, chemin_t chemin, int mask)
       {
         if (!present(i, mask))
         {
-          int new_chemin [MAX_NBVILLES];
-          memcpy(new_chemin,chemin,etape*sizeof(int));
-          new_chemin[etape] = i;
+          // int new_chemin [MAX_NBVILLES];
+          // memcpy(new_chemin,chemin,etape*sizeof(int));
+          // new_chemin[etape] = i;
+          // dist = distance[ici][i];      
+          // tsp_seq(etape + 1, lg + dist, new_chemin, mask | (1 << i));
+ 
+          chemin[etape] = i;
           dist = distance[ici][i];      
-          tsp_seq(etape + 1, lg + dist, new_chemin, mask | (1 << i));
+          tsp_seq(etape + 1, lg + dist, chemin, mask | (1 << i));
         }
       }
     }
