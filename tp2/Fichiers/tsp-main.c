@@ -144,7 +144,7 @@ void tsp_ompfor(int etape, int lg, chemin_t chemin, int mask)
         if (!present(i, mask))
         {
           int new_chemin [MAX_NBVILLES];
-          memcpy(new_chemin,chemin,MAX_NBVILLES*sizeof(int));
+          memcpy(new_chemin,chemin,etape*sizeof(int));
           new_chemin[etape] = i;
           dist = distance[ici][i];      
           tsp_seq(etape + 1, lg + dist, new_chemin, mask | (1 << i));
@@ -152,7 +152,7 @@ void tsp_ompfor(int etape, int lg, chemin_t chemin, int mask)
       }
     }
     else{
-      #pragma omp parallel for if (etape <= grain) firstprivate(mask,etape,ici) //shared(chemin)
+      #pragma omp parallel for if (etape <= grain) firstprivate(mask,etape,ici) num_threads(nbVilles-etape) schedule(runtime)
       for (int i = 1; i < nbVilles; i++)
       {
         if (!present(i, mask))
