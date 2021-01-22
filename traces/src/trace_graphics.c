@@ -26,7 +26,7 @@
 #define WINDOW_MIN_WIDTH 1024
 // no WINDOW_MIN_HEIGHT: needs to be automatically computed
 
-#define MIN_TASK_HEIGHT 8
+#define MIN_TASK_HEIGHT 4
 #define MAX_TASK_HEIGHT 44
 
 #define MAX_PREVIEW_DIM 512
