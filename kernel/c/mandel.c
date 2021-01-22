@@ -101,6 +101,7 @@ unsigned mandel_compute_tiled_omp (unsigned nb_iter)
 }
 
 
+
 /////////////// Mandelbrot basic computation
 
 #define MAX_ITERATIONS 4096

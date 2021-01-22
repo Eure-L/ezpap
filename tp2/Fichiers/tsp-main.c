@@ -4,7 +4,6 @@
 #include <math.h>
 #include <limits.h>
 #include <sys/time.h>
-#include "collapse.h"
 
 // #include <omp.h>
 
@@ -128,8 +127,8 @@ void tsp_seq(int etape, int lg, chemin_t chemin, int mask)
 
 void tsp_ompfor(int etape, int lg, chemin_t chemin, int mask)
 {
-  if(lg +  distance[0][chemin[etape-1]]>= minimum)
-    return;
+  // if(lg +  distance[0][chemin[etape-1]]>= minimum)
+  //   return;
   int ici, dist;
   if ( etape == nbVilles){
     #pragma omp critical
