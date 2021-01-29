@@ -22,7 +22,7 @@ int main()
 {
    #pragma omp parallel  
   {
-   #pragma omp single
+   #pragma omp master
     {
       for (int i = 0 ; bonjour[i] != NULL; i++)
       #pragma omp task firstprivate(i) 
@@ -33,9 +33,9 @@ int main()
           #pragma omp taskwait
 
           #pragma omp task firstprivate(i) 
-	  printf("%s (%d)\n",aurevoir[i], omp_get_thread_num());
-        } 
-      }
+	        printf("%s (%d)\n",aurevoir[i], omp_get_thread_num());
+      } 
+    }
   } 
   return 0;
 }

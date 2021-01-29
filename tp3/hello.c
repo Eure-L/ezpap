@@ -5,13 +5,15 @@
 
 int main()
 {
-  #pragma omp parallel  
+  #pragma omp parallel num_threads(1)
   {
-    #pragma omp task
-    printf("Bonjour de la part de %d\n",omp_get_thread_num() );
+    int me = omp_get_thread_num();
 
-    #pragma omp task
-    printf("Au revoir de la part de %d\n",omp_get_thread_num() );    
+    #pragma omp task firstprivate(me)
+    printf("Bonjour de la part de %d exécuté par %d\n",omp_get_thread_num(),me );
+
+    #pragma omp task firstprivate(me)
+    printf("Au revoir de la part de %d exécuté par %d\n",omp_get_thread_num(), me );    
   }
   return 0;
 }
