@@ -8,11 +8,12 @@ void generer()
   char chaine[]="jusqu'ici tout va bien";
   
   for(int i = 0; i < 10 ; i++)
-#pragma omp task shared(chaine) firstprivate(i)
+  
+#pragma omp task  firstprivate(i,chaine)
     printf("tache %d par thread %d >>>> %s <<<< \n",
 	   i,omp_get_thread_num(), chaine);
   
-#pragma omp taskwait
+//#pragma omp taskwait
 }
 
 

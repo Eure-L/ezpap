@@ -24,9 +24,19 @@ int main (int argc, char **argv)
   // génération des taches
 #pragma omp parallel
 #pragma omp single
+#pragma omp task
   for (i=0; i < T; i++ )
     for (j=0; j < T; j++ )
-#pragma omp task firstprivate(i,j)
+
+    
+    if(i>0)
+    #pragma omp task firstprivate(i,j) depend(in:A[i-1][j]) depend(out:A[i][j])
+      tache(i,j);
+    else if (j>0)
+    #pragma omp task firstprivate(i,j) depend(in:A[i][j-1]) depend(out:A[i][j])
+      tache(i,j);
+    else
+    #pragma omp task firstprivate(i,j) depend(out:A[i][j])
       tache(i,j);
 
   // affichage du tableau 
