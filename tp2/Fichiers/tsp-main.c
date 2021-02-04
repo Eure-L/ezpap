@@ -143,15 +143,15 @@ void tsp_ompfor(int etape, int lg, chemin_t chemin, int mask)
       {
         if (!present(i, mask))
         {
-          // int new_chemin [MAX_NBVILLES];
-          // memcpy(new_chemin,chemin,etape*sizeof(int));
-          // new_chemin[etape] = i;
-          // dist = distance[ici][i];      
-          // tsp_seq(etape + 1, lg + dist, new_chemin, mask | (1 << i));
- 
-          chemin[etape] = i;
+          int new_chemin [MAX_NBVILLES];
+          memcpy(new_chemin,chemin,etape*sizeof(int));
+          new_chemin[etape] = i;
           dist = distance[ici][i];      
-          tsp_seq(etape + 1, lg + dist, chemin, mask | (1 << i));
+          tsp_seq(etape + 1, lg + dist, new_chemin, mask | (1 << i));
+ 
+          // chemin[etape] = i;
+          // dist = distance[ici][i];      
+          // tsp_seq(etape + 1, lg + dist, chemin, mask | (1 << i));
         }
       }
     }
@@ -231,6 +231,94 @@ void tsp_ompcol2()
 }
 
 
+void tsp_omptask(int etape, int lg, chemin_t chemin, int mask)
+{
+  if(lg +  distance[0][chemin[etape-1]]>= minimum)
+    return;
+  int ici, dist;
+  if ( etape == nbVilles){
+    #pragma omp critical
+    verifier_minimum(lg, chemin);
+  }
+  else
+  {
+    ici = chemin[etape - 1];
+
+    if (etape > grain){
+      for (int i = 1; i < nbVilles; i++)
+      {
+        if (!present(i, mask))
+        {
+          chemin[etape] = i;
+          dist = distance[ici][i];
+          tsp_seq(etape + 1, lg + dist, chemin, mask | (1 << i));
+        }
+      }
+    }
+    else{
+      for (int i = 1; i < nbVilles; i++)
+      {
+        if (!present(i, mask))
+        {
+          #pragma omp task
+          {
+          int new_chemin [MAX_NBVILLES];
+          memcpy(new_chemin,chemin,MAX_NBVILLES*sizeof(int));
+          new_chemin[etape] = i;
+          dist = distance[ici][i];
+          tsp_omptask(etape + 1, lg + dist, new_chemin, mask | (1 << i));
+          }
+        }
+      }
+    }
+    #pragma omp taskwait
+  }
+  
+}
+void tsp_omptask2(int etape, int lg, chemin_t chemin, int mask)
+{
+  if(lg +  distance[0][chemin[etape-1]]>= minimum)
+    return;
+  int ici, dist;
+  if ( etape == nbVilles){
+    #pragma omp critical
+    verifier_minimum(lg, chemin);
+  }
+  else
+  {
+    ici = chemin[etape - 1];
+
+    if (etape > grain){
+      for (int i = 1; i < nbVilles; i++)
+      {
+        if (!present(i, mask))
+        {
+          chemin[etape] = i;
+          dist = distance[ici][i];
+          tsp_seq(etape + 1, lg + dist, chemin, mask | (1 << i));
+        }
+      }
+    }
+    else{
+      for (int i = 1; i < nbVilles; i++)
+      {
+        if (!present(i, mask))
+        {
+          #pragma omp task firstprivate()
+          {
+          int * new_chemin =(int*) malloc(sizeof(int) * MAX_NBVILLES);
+          memcpy(new_chemin,chemin,MAX_NBVILLES*sizeof(int));
+          new_chemin[etape] = i;
+          dist = distance[ici][i];
+          tsp_omptask2(etape + 1, lg + dist, new_chemin, mask | (1 << i));
+          free(new_chemin);
+          }
+        }
+      }
+    }
+  }
+}
+  
 int main(int argc, char **argv)
 {
   omp_set_nested(1);
@@ -259,6 +347,12 @@ int main(int argc, char **argv)
     tsp_ompcol3(1, 0, chemin, 1);
   else if (!strcmp(argv[argc-1],"ompcol4")) 
     tsp_ompcol4(1, 0, chemin, 1);
+  else if (!strcmp(argv[argc-1],"omptask")) 
+    #pragma omp parallel master
+    tsp_omptask(1, 0, chemin, 1); 
+  else if (!strcmp(argv[argc-1],"omptask2")) 
+    #pragma omp parallel master
+    tsp_omptask2(1, 0, chemin, 1); 
   else
   {
       printf("kernel inconnu\n");
