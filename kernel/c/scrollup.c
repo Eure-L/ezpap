@@ -152,6 +152,8 @@ unsigned scrollup_invoke_ocl_ouf (unsigned nb_iter)
   size_t local[2]  = {GPU_TILE_W, GPU_TILE_H}; // local domain size for our calculation
   cl_int err;
 
+  monitoring_start_tile (easypap_gpu_lane (TASK_TYPE_COMPUTE));
+
   for (unsigned it = 1; it <= nb_iter; it++) {
     unsigned color = 0xFF0000FF;
     // Set kernel arguments
@@ -175,6 +177,10 @@ unsigned scrollup_invoke_ocl_ouf (unsigned nb_iter)
       next_buffer = tmp;
     }
   }
+
+  clFinish (queue);
+
+  monitoring_end_tile (0, 0, DIM, DIM, easypap_gpu_lane (TASK_TYPE_COMPUTE));
 
   return 0;
 }

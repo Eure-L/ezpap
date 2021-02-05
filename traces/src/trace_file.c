@@ -51,11 +51,12 @@ void trace_file_load (char *file)
       break;
 
     case TRACE_NB_THREADS: {
-      unsigned nc      = ev.param[0];
-      unsigned ng      = ev.param[1];
+      unsigned nc = ev.param[0];
+      unsigned ng = ev.param[1];
       if (ng & 1) // number of GPU lanes must be even
-        exit_with_error ("Bad trace header: #GPU (= %d) expected to be even", ng);
-        
+        exit_with_error ("Bad trace header: #GPU (= %d) expected to be even",
+                         ng);
+
       last_start_times = malloc ((nc + ng) * sizeof (long));
       for (int c = 0; c < nc + ng; c++)
         last_start_times[c] = 0;
@@ -68,9 +69,10 @@ void trace_file_load (char *file)
       break;
 
     case TRACE_END_TILE:
-      trace_data_add_task (&trace[nb_traces], last_start_times[cpu],
-                           ev.param[0], ev.param[2], ev.param[3], ev.param[4],
-                           ev.param[5], current_iteration, cpu, ev.param[6]);
+      trace_data_add_task (
+          &trace[nb_traces], last_start_times[cpu], ev.param[0], ev.param[2],
+          ev.param[3], ev.param[4], ev.param[5], current_iteration, cpu,
+          TASK_EXTRACT_TTYPE (ev.param[6]), TASK_EXTRACT_TID (ev.param[6]));
       break;
 
     case TRACE_DIM:
@@ -79,6 +81,14 @@ void trace_file_load (char *file)
 
     case TRACE_LABEL:
       trace_data_set_label (&trace[nb_traces], (char *)ev.raw);
+      break;
+
+    case TRACE_TASKID_COUNT:
+      trace_data_alloc_task_ids (&trace[nb_traces], ev.param[0]);
+      break;
+
+    case TRACE_TASKID:
+      trace_data_add_taskid (&trace[nb_traces], (char *)ev.raw);
       break;
 
     default:

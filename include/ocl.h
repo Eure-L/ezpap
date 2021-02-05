@@ -27,7 +27,6 @@ void ocl_map_textures (GLuint texid);
 void ocl_send_data (void);
 void ocl_retrieve_data (void);
 unsigned ocl_invoke_kernel_generic (unsigned nb_iter);
-void ocl_wait (void);
 void ocl_update_texture (void);
 unsigned easypap_number_of_gpus (void);
 size_t ocl_get_max_workgroup_size (void);

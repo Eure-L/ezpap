@@ -37,18 +37,20 @@ void trace_data_init (trace_t *tr, unsigned num)
   fixed_gap          = 0;
   current_it         = NULL;
 
-  tr->num           = num;
-  tr->nb_cores      = 1;
-  tr->nb_gpu        = 0;
-  tr->per_cpu       = NULL;
-  tr->nb_iterations = 0;
-  tr->label         = NULL;
+  tr->num            = num;
+  tr->nb_cores       = 1;
+  tr->nb_gpu         = 0;
+  tr->per_cpu        = NULL;
+  tr->nb_iterations  = 0;
+  tr->label          = NULL;
+  tr->task_ids       = NULL;
+  tr->task_ids_count = 0;
 }
 
 void trace_data_set_nb_threads (trace_t *tr, unsigned nb_cores, unsigned nb_gpu)
 {
   tr->nb_cores = nb_cores + nb_gpu;
-  tr->nb_gpu = nb_gpu;
+  tr->nb_gpu   = nb_gpu;
   tr->per_cpu  = malloc (tr->nb_cores * sizeof (trace_task_t));
   for (int i = 0; i < tr->nb_cores; i++)
     INIT_LIST_HEAD (tr->per_cpu + i);
@@ -65,9 +67,25 @@ void trace_data_set_label (trace_t *tr, char *label)
   strcpy (tr->label, label);
 }
 
+static int next_id[MAX_TRACES] = {0, 0};
+
+void trace_data_alloc_task_ids (trace_t *tr, unsigned count)
+{
+  tr->task_ids = calloc (count, sizeof (char *));
+  tr->task_ids_count = count;
+}
+
+void trace_data_add_taskid (trace_t *tr, char *id)
+{
+  int i           = next_id[tr->num]++;
+  tr->task_ids[i] = malloc (strlen (id) + 1);
+  strcpy (tr->task_ids[i], id);
+}
+
 void trace_data_add_task (trace_t *tr, long start_time, long end_time,
                           unsigned x, unsigned y, unsigned w, unsigned h,
-                          unsigned iteration, unsigned cpu, task_type_t task_type)
+                          unsigned iteration, unsigned cpu,
+                          task_type_t task_type, int task_id)
 {
   trace_task_t *t = malloc (sizeof (trace_task_t));
 
@@ -78,7 +96,8 @@ void trace_data_add_task (trace_t *tr, long start_time, long end_time,
   t->w          = w;
   t->h          = h;
   t->iteration  = iteration;
-  t->task_type = task_type;
+  t->task_type  = task_type;
+  t->task_id    = task_id;
 
   list_add_tail (&t->cpu_chain, tr->per_cpu + cpu);
 

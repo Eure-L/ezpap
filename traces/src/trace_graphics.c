@@ -114,6 +114,8 @@ struct
   SDL_Rect gantt, mosaic;
   SDL_Texture *label_tex;
   unsigned label_width, label_height;
+  SDL_Texture **task_ids_tex;
+  unsigned *task_ids_tex_width;
 } trace_display_info[MAX_TRACES]; // no more than MAX_TRACES simultaneous traces
 
 static SDL_Rect gantts_bounding_box;
@@ -513,9 +515,9 @@ static void create_tab_textures (TTF_Font *font)
 
   for (int t = 0; t < nb_traces; t++) {
     SDL_Surface *s =
-        TTF_RenderText_Blended (font, trace[t].label, backgrd_color);
+        TTF_RenderUTF8_Blended (font, trace[t].label, backgrd_color);
     if (s == NULL)
-      exit_with_error ("TTF_RenderText_Solid failed: %s", SDL_GetError ());
+      exit_with_error ("TTF_RenderUTF8_Blended failed: %s", SDL_GetError ());
 
     trace_display_info[t].label_tex =
         SDL_CreateTextureFromSurface (renderer, s);
@@ -525,13 +527,35 @@ static void create_tab_textures (TTF_Font *font)
   }
 }
 
+static void create_task_ids_textures (TTF_Font *font)
+{
+  for (int t = 0; t < nb_traces; t++) {
+    trace_display_info[t].task_ids_tex =
+        calloc (trace[t].task_ids_count, sizeof (SDL_Texture *));
+    trace_display_info[t].task_ids_tex_width =
+        calloc (trace[t].task_ids_count, sizeof (unsigned));
+
+    for (int i = 0; i < trace[t].task_ids_count; i++) {
+      SDL_Surface *s =
+          TTF_RenderUTF8_Blended (font, trace[t].task_ids[i], silver_color);
+      if (s == NULL)
+        exit_with_error ("TTF_RenderUTF8_Blended failed: %s", SDL_GetError ());
+
+      trace_display_info[t].task_ids_tex[i] =
+          SDL_CreateTextureFromSurface (renderer, s);
+      trace_display_info[t].task_ids_tex_width[i] = s->w;
+      SDL_FreeSurface (s);
+    }
+  }
+}
+
 static void blit_on_surface (SDL_Surface *surface, TTF_Font *font, int trace,
                              unsigned line, char *msg)
 {
   SDL_Rect dst;
   SDL_Surface *s = TTF_RenderText_Blended (font, msg, silver_color);
   if (s == NULL)
-    exit_with_error ("TTF_RenderText_Solid failed: %s", SDL_GetError ());
+    exit_with_error ("TTF_RenderText_Blended failed: %s", SDL_GetError ());
 
   dst.x = LEFT_MARGIN - s->w;
   dst.y = trace_display_info[trace].gantt.y + CPU_ROW_HEIGHT * line +
@@ -583,6 +607,8 @@ static void create_text_texture (TTF_Font *font)
   create_digit_textures (font);
 
   create_tab_textures (font);
+
+  create_task_ids_textures (font);
 }
 
 static void create_misc_tex (void)
@@ -646,18 +672,25 @@ static void create_misc_tex (void)
 
 static inline void get_tile_rect (trace_t *tr, trace_task_t *t, SDL_Rect *dst)
 {
-  dst->x = t->x * trace_display_info[tr->num].mosaic.w / tr->dimensions +
-           trace_display_info[tr->num].mosaic.x;
-  dst->y = t->y * trace_display_info[tr->num].mosaic.h / tr->dimensions +
-           trace_display_info[tr->num].mosaic.y;
-  dst->w =
-      ((t->x + t->w) * trace_display_info[tr->num].mosaic.w / tr->dimensions +
-       trace_display_info[tr->num].mosaic.x - dst->x)
-          ?: 1;
-  dst->h =
-      ((t->y + t->h) * trace_display_info[tr->num].mosaic.h / tr->dimensions +
-       trace_display_info[tr->num].mosaic.y - dst->y)
-          ?: 1;
+  if (t->w && t->h) {
+    dst->x = t->x * trace_display_info[tr->num].mosaic.w / tr->dimensions +
+             trace_display_info[tr->num].mosaic.x;
+    dst->y = t->y * trace_display_info[tr->num].mosaic.h / tr->dimensions +
+             trace_display_info[tr->num].mosaic.y;
+    dst->w =
+        ((t->x + t->w) * trace_display_info[tr->num].mosaic.w / tr->dimensions +
+         trace_display_info[tr->num].mosaic.x - dst->x)
+            ?: 1;
+    dst->h =
+        ((t->y + t->h) * trace_display_info[tr->num].mosaic.h / tr->dimensions +
+         trace_display_info[tr->num].mosaic.y - dst->y)
+            ?: 1;
+  } else { // task has no associated tile
+    dst->x = 0;
+    dst->y = 0;
+    dst->w = 0;
+    dst->h = 0;
+  }
 }
 
 static void show_tile (trace_t *tr, trace_task_t *t, unsigned cpu,
@@ -801,7 +834,7 @@ static void display_selection (void)
   }
 }
 
-static void display_mouse_selection (trace_task_t *t)
+static void display_mouse_selection (trace_t *tr, trace_task_t *t)
 {
   if (horiz_mode) {
     // horizontal bar
@@ -840,6 +873,17 @@ static void display_mouse_selection (trace_task_t *t)
 
         display_duration (t->end_time - t->start_time, mouse_x - 27, dst.y + 6,
                           dst.w - 3);
+
+        if (t->task_id) { // Do not display "anonymous" IDs
+          dst.w = trace_display_info[tr->num].task_ids_tex_width[t->task_id];
+          dst.h = FONT_HEIGHT;
+          dst.x = mouse_x - dst.w / 2;
+          dst.y = trace_display_info[tr->num].gantt.y +
+                  trace_display_info[tr->num].gantt.h;
+          SDL_RenderCopy (renderer,
+                          trace_display_info[tr->num].task_ids_tex[t->task_id],
+                          NULL, &dst);
+        }
       }
     }
   }
@@ -963,7 +1007,8 @@ static void display_gantt_background (trace_t *tr, int _t, int first_it)
 
 static void trace_graphics_display (void)
 {
-  trace_task_t *selected_task = NULL;
+  trace_task_t *selected_task  = NULL;
+  trace_t *selected_task_trace = NULL;
 
   SDL_RenderClear (renderer);
 
@@ -1086,7 +1131,8 @@ static void trace_graphics_display (void)
                 // vertical line crosses the task
                 if (point_in_yrange (&dst, my)) {
 
-                  selected_task = t;
+                  selected_task       = t;
+                  selected_task_trace = tr;
                   // The task is under the mouse cursor: display it a little
                   // bigger!
                   dst.x -= 3;
@@ -1094,7 +1140,9 @@ static void trace_graphics_display (void)
                   dst.w += 6;
                   dst.h += 6;
                 }
-                to_be_emphasized[c] = t;
+                if (t->w &&
+                    t->h) // if task has as associated tile to be displayed
+                  to_be_emphasized[c] = t;
               }
 
               SDL_RenderCopy (renderer, perf_fill[task_color], NULL, &dst);
@@ -1138,6 +1186,10 @@ static void trace_graphics_display (void)
         list_for_each_entry_from (trace_task_t, t, tr->per_cpu + selected_cpu,
                                   selected_first, cpu_chain)
         {
+          // Stop if the task has no associated tile
+          if (t->w == 0 || t->h == 0)
+            continue;
+
           if (task_end_time (tr, t) < start_time)
             continue;
 
@@ -1162,7 +1214,7 @@ static void trace_graphics_display (void)
   } // for (_t)
 
   // Mouse
-  display_mouse_selection (selected_task);
+  display_mouse_selection (selected_task_trace, selected_task);
 
   SDL_RenderPresent (renderer);
 }
@@ -1454,7 +1506,6 @@ void trace_graphics_mouse_moved (int x, int y)
       selection_start_time = mouse_orig_time;
       selection_duration   = new_pos - mouse_orig_time;
     }
-
   }
 
   trace_graphics_display ();

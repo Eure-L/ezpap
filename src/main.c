@@ -62,6 +62,12 @@ unsigned easypap_requested_number_of_threads (void)
     return atoi (str);
 }
 
+unsigned easypap_gpu_lane (task_type_t task_type)
+{
+  return easypap_requested_number_of_threads () +
+         (task_type == TASK_TYPE_COMPUTE ? 0 : 1);
+}
+
 char *easypap_omp_schedule (void)
 {
   char *str = getenv ("OMP_SCHEDULE");
@@ -105,7 +111,8 @@ void easypap_check_mpi (void)
 void easypap_check_vectorization (vec_type_t vec_type, direction_t dir)
 {
 #ifdef ENABLE_VECTO
-  // Order of types must be consistent with that defined in vec_type enum (see api_funcs.h)
+  // Order of types must be consistent with that defined in vec_type enum (see
+  // api_funcs.h)
   int bytes[] = {VEC_SIZE_CHAR, VEC_SIZE_INT, VEC_SIZE_FLOAT, VEC_SIZE_DOUBLE};
   int n       = (dir == DIR_HORIZONTAL ? TILE_W : TILE_H);
 
@@ -142,7 +149,7 @@ static void output_perf_numbers (long time_in_us, unsigned nb_iter)
                      strerror (errno));
 
   if (ftell (f) == 0) {
-    fprintf (f, "%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s\n", "machine", "dim",
+    fprintf (f, "%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s\n", "machine", "size",
              "tilew", "tileh", "threads", "kernel", "variant", "iterations",
              "schedule", "label", "arg", "time");
   }
@@ -311,6 +318,10 @@ static void init_phases (void)
     PRINT_DEBUG ('i', "Init phase 3: [no init() hook defined]\n");
   }
 
+  // Make sure at leat one task id (0 = anonymous) is stored in the trace
+  if (do_trace)
+    trace_record_commit_task_ids ();
+
   // Allocate memory for cur_img and next_img images
   img_data_alloc ();
 
@@ -476,8 +487,6 @@ int main (int argc, char **argv)
             monitoring_start_iteration ();
 
             n = the_compute (refresh_rate);
-            if (opencl_used)
-              ocl_wait ();
 
             monitoring_end_iteration ();
 
@@ -568,9 +577,6 @@ int main (int argc, char **argv)
           iterations += refresh_rate;
       }
     }
-
-    if (opencl_used)
-      ocl_wait ();
 
     gettimeofday (&t2, NULL);
 
@@ -663,8 +669,9 @@ static void usage (int val)
   fprintf (stderr, "\t-s\t| --size <DIM>\t\t: use image of size DIM x DIM\n");
   fprintf (stderr,
            "\t-sr\t| --soft-rendering\t: disable hardware acceleration\n");
-  fprintf (stderr,
-           "\t-si\t| --show-iterations\t: display iterations in main window \n");
+  fprintf (
+      stderr,
+      "\t-si\t| --show-iterations\t: display iterations in main window \n");
   fprintf (stderr,
            "\t-so\t| --show-ocl\t\t: display OpenCL platform and devices\n");
   fprintf (stderr, "\t-tn\t| --thumbnails\t\t: generate thumbnails\n");

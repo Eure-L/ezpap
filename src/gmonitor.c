@@ -75,7 +75,8 @@ void gmonitor_init (int x, int y)
     exit_with_error ("SDL_CreateWindow failed (%s)", SDL_GetError ());
 
   // Initialisation du moteur de rendu
-  ren = SDL_CreateRenderer (win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+  ren = SDL_CreateRenderer (
+      win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
   if (ren == NULL)
     exit_with_error ("SDL_CreateRenderer failed (%s)", SDL_GetError ());
 
@@ -132,34 +133,37 @@ void __gmonitor_end_tile (long time, int who, int x, int y, int width,
                           int height)
 {
   long duration __attribute__ ((unused)) = cpustat_finish_work (time, who);
-  long t1, t2;
-  unsigned color                         = cpu_colors[who % MAX_COLORS];
 
-  t1 = what_time_is_it ();
-  
+  if (width && height) { // task has an associated tile
+    long t1, t2;
+    unsigned color = cpu_colors[who % MAX_COLORS];
+
+    t1 = what_time_is_it ();
+
 #ifdef LOAD_INTENSITY
-  if (duration > max_duration)
-    max_duration = duration;
+    if (duration > max_duration)
+      max_duration = duration;
 
-  if (heat_mode && prev_max_duration) { // not the first iteration
-    if (duration <= prev_max_duration) {
-      long intensity = 8191 * duration / prev_max_duration;
-      // log2(intensity) is in [0..12]
-      // so 20 * log2(intensity) + 15 is in [15..255]
-      unsigned char alpha = 20 * mylog2 (intensity) + 15;
+    if (heat_mode && prev_max_duration) { // not the first iteration
+      if (duration <= prev_max_duration) {
+        long intensity = 8191 * duration / prev_max_duration;
+        // log2(intensity) is in [0..12]
+        // so 20 * log2(intensity) + 15 is in [15..255]
+        unsigned char alpha = 20 * mylog2 (intensity) + 15;
 
-      color = (color & 0xFFFFFF00) | alpha;
+        color = (color & 0xFFFFFF00) | alpha;
+      }
     }
-  }
 #endif
 
-  for (int i = y; i < y + height; i++)
-    for (int j = x; j < x + width; j++)
-      trace_img[i * DIM + j] = color;
+    for (int i = y; i < y + height; i++)
+      for (int j = x; j < x + width; j++)
+        trace_img[i * DIM + j] = color;
 
-  t2 = what_time_is_it ();
+    t2 = what_time_is_it ();
 
-  cpustat_deduct_idle (t2 - t1, who);
+    cpustat_deduct_idle (t2 - t1, who);
+  }
 }
 
 void __gmonitor_end_iteration (long time)

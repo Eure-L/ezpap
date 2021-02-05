@@ -318,14 +318,15 @@ static void ocl_list_variants (void)
   exit (0);
 }
 
-#define CALIBRATION_ITER 16
+#define CALIBRATION_BURST 4
+#define CALIBRATION_ITER  64
 long _calibration_delta = 0;
 
 static void calibrate (void)
 {
-  size_t global[1] = {512}; // global domain size for our calculation
+  size_t global[1] = {4096 * 64}; // global domain size for our calculation
   size_t local[1]  = {16};  // local domain size for our calculation
-  cl_event events[CALIBRATION_ITER];
+  cl_event events[CALIBRATION_BURST];
   long t;
   cl_int err;
 
@@ -341,8 +342,8 @@ static void calibrate (void)
   }
   clFinish (queue);
 
-  for (int i = 0; i < 100; i++) {
-    for (unsigned it = 0; it < CALIBRATION_ITER; it++)
+  for (int i = 0; i < CALIBRATION_ITER; i++) {
+    for (unsigned it = 0; it < CALIBRATION_BURST; it++)
       err = clEnqueueNDRangeKernel (queue, bench_kernel, 1, NULL, global, local,
                                     0, NULL, &events[it]);
     clFinish (queue);
@@ -350,7 +351,7 @@ static void calibrate (void)
 
     cl_ulong end;
 
-    clGetEventProfilingInfo (events[CALIBRATION_ITER - 1],
+    clGetEventProfilingInfo (events[CALIBRATION_BURST - 1],
                              CL_PROFILING_COMMAND_END, sizeof (cl_ulong), &end,
                              NULL);
 
@@ -360,7 +361,7 @@ static void calibrate (void)
       _calibration_delta = min (_calibration_delta, t - (end / 1000));
     }
 
-    for (unsigned it = 0; it < CALIBRATION_ITER; it++)
+    for (unsigned it = 0; it < CALIBRATION_BURST; it++)
       clReleaseEvent (events[it]);
   }
 }
@@ -516,13 +517,13 @@ void ocl_retrieve_data (void)
   PRINT_DEBUG ('o', "Image retrieved from device.\n");
 }
 
-static cl_event prof_event;
-
 unsigned ocl_invoke_kernel_generic (unsigned nb_iter)
 {
   size_t global[2] = {GPU_SIZE_X, GPU_SIZE_Y}; // global domain size for our calculation
   size_t local[2]  = {GPU_TILE_W, GPU_TILE_H}; // local domain size for our calculation
   cl_int err;
+
+  monitoring_start_tile (easypap_gpu_lane (TASK_TYPE_COMPUTE));
 
   for (unsigned it = 1; it <= nb_iter; it++) {
 
@@ -534,7 +535,7 @@ unsigned ocl_invoke_kernel_generic (unsigned nb_iter)
     check (err, "Failed to set kernel arguments");
 
     err = clEnqueueNDRangeKernel (queue, compute_kernel, 2, NULL, global, local,
-                                  0, NULL, &prof_event);
+                                  0, NULL, NULL);
     check (err, "Failed to execute kernel");
 
     // Swap buffers
@@ -545,26 +546,11 @@ unsigned ocl_invoke_kernel_generic (unsigned nb_iter)
     }
   }
 
-  return 0;
-}
-
-void ocl_wait (void)
-{
-  cl_ulong start, end;
-  // Wait for the command commands to get serviced before reading back results
-  //
   clFinish (queue);
 
-  clGetEventProfilingInfo (prof_event, CL_PROFILING_COMMAND_START,
-                           sizeof (cl_ulong), &start, NULL);
-  clGetEventProfilingInfo (prof_event, CL_PROFILING_COMMAND_END,
-                           sizeof (cl_ulong), &end, NULL);
-  clReleaseEvent (prof_event);
-#if 0
-  cl_ulong elapsed = end - start;
-  printf ("Last kernel started at %lld and finished at %lld (duration = %lld)\n", start, end, elapsed);
-  printf ("time now = %ld\n", what_time_is_it ());
-#endif
+  monitoring_end_tile (0, 0, DIM, DIM, easypap_gpu_lane (TASK_TYPE_COMPUTE));
+
+  return 0;
 }
 
 void ocl_update_texture (void)
@@ -620,15 +606,14 @@ long ocl_monitor (cl_event evt, int x, int y, int width, int height,
                   task_type_t task_type)
 {
   long start, end;
-  unsigned gpu_lane = easypap_requested_number_of_threads () +
-                      (task_type == TASK_TYPE_COMPUTE ? 0 : 1);
+  unsigned gpu_lane = easypap_gpu_lane (TASK_TYPE_COMPUTE);
 
   start = ocl_start_time (evt);
   end   = ocl_end_time (evt);
 
   long now = what_time_is_it ();
   if (end > now) {
-    fprintf (stderr, "Warning: end of kernel ahead of current time by %ld µs\n", end - now);
+    fprintf (stderr, "Warning: end of kernel (%s) ahead of current time by %ld µs\n", task_type == TASK_TYPE_COMPUTE ? "TASK_TYPE_COMPUTE" : "TASK_TYPE_TRANSFER", end - now);
   }
 
   PRINT_DEBUG ('m', "[%s] start: %ld, end: %ld\n", "kernel", start, end);

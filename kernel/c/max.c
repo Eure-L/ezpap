@@ -5,6 +5,22 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// CAUTION: task_ids constants and string representation must be declared in the
+// same order
+enum
+{
+  TASKID_DOWN_RIGHT,
+  TASKID_UP_LEFT
+};
+
+static char *task_ids[] = {"Down Right Propagation", "Up Left Propagation",
+                           NULL};
+
+void max_init (void)
+{
+  monitoring_declare_task_ids (task_ids);
+}
+
 // We propagate the max color down-right. This is the expensive implementation
 // which constantly checks border conditions...
 int tile_down_right (int x, int y, int w, int h, int cpu)
@@ -37,7 +53,7 @@ int tile_down_right (int x, int y, int w, int h, int cpu)
         }
       }
 
-  monitoring_end_tile (x, y, w, h, cpu);
+  monitoring_end_tile_id (x, y, w, h, cpu, TASKID_DOWN_RIGHT);
 
   return change;
 }
@@ -74,7 +90,7 @@ int tile_up_left (int x, int y, int w, int h, int cpu)
         }
       }
 
-  monitoring_end_tile (x, y, w, h, cpu);
+  monitoring_end_tile_id (x, y, w, h, cpu, TASKID_UP_LEFT);
 
   return change;
 }

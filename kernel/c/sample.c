@@ -26,6 +26,8 @@ unsigned sample_invoke_ocl (unsigned nb_iter)
   size_t local[2]  = {GPU_TILE_W, GPU_TILE_H}; // local domain size for our calculation
   cl_int err;
 
+  monitoring_start_tile (easypap_gpu_lane (TASK_TYPE_COMPUTE));
+
   for (unsigned it = 1; it <= nb_iter; it++) {
 
     // Set kernel arguments
@@ -40,6 +42,10 @@ unsigned sample_invoke_ocl (unsigned nb_iter)
     check (err, "Failed to execute kernel");
 
   }
+
+  clFinish (queue);
+
+  monitoring_end_tile (0, 0, DIM, DIM, easypap_gpu_lane (TASK_TYPE_COMPUTE));
 
   return 0;
 }
