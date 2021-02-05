@@ -304,7 +304,7 @@ void tsp_omptask2(int etape, int lg, chemin_t chemin, int mask)
       {
         if (!present(i, mask))
         {
-          #pragma omp task firstprivate()
+          #pragma omp task
           {
           int * new_chemin =(int*) malloc(sizeof(int) * MAX_NBVILLES);
           memcpy(new_chemin,chemin,MAX_NBVILLES*sizeof(int));
@@ -348,10 +348,12 @@ int main(int argc, char **argv)
   else if (!strcmp(argv[argc-1],"ompcol4")) 
     tsp_ompcol4(1, 0, chemin, 1);
   else if (!strcmp(argv[argc-1],"omptask")) 
-    #pragma omp parallel master
+    #pragma omp parallel
+    #pragma omp master
     tsp_omptask(1, 0, chemin, 1); 
   else if (!strcmp(argv[argc-1],"omptask2")) 
-    #pragma omp parallel master
+    #pragma omp parallel
+    #pragma omp master
     tsp_omptask2(1, 0, chemin, 1); 
   else
   {
