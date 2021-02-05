@@ -304,14 +304,15 @@ void tsp_omptask2(int etape, int lg, chemin_t chemin, int mask)
       {
         if (!present(i, mask))
         {
-          #pragma omp task
+          #pragma omp task firstprivate(chemin)
           {
-          int * new_chemin =(int*) malloc(sizeof(int) * MAX_NBVILLES);
-          memcpy(new_chemin,chemin,MAX_NBVILLES*sizeof(int));
-          new_chemin[etape] = i;
+          //int new_chemin [MAX_NBVILLES];
+          //int * new_chemin =(int*) malloc(sizeof(int) * MAX_NBVILLES);
+          //memcpy(new_chemin,chemin,MAX_NBVILLES*sizeof(int));
+          chemin[etape] = i;
           dist = distance[ici][i];
-          tsp_omptask2(etape + 1, lg + dist, new_chemin, mask | (1 << i));
-          free(new_chemin);
+          tsp_omptask2(etape + 1, lg + dist, chemin, mask | (1 << i));
+          //free(new_chemin);
           }
         }
       }

@@ -16,6 +16,7 @@ enum
 static char *task_ids[] = {"Down Right Propagation", "Up Left Propagation",
                            NULL};
 
+
 void max_init (void)
 {
   monitoring_declare_task_ids (task_ids);
@@ -28,7 +29,6 @@ int tile_down_right (int x, int y, int w, int h, int cpu)
   int change = 0;
 
   monitoring_start_tile (cpu);
-
   for (int i = y; i < y + h; i++)
     for (int j = x; j < x + w; j++)
       if (cur_img (i, j)) {
@@ -95,6 +95,82 @@ int tile_up_left (int x, int y, int w, int h, int cpu)
   return change;
 }
 
+// We propagate the max color down-right. This is the expensive implementation
+// which constantly checks border conditions...
+int tile_down_right_omp (int x, int y, int w, int h, int cpu)
+{
+  int change = 0;
+
+  monitoring_start_tile (cpu);
+  #pragma omp parallel for collapse (2) num_threads(16)
+  for (int i = y; i < y + h; i++)
+    for (int j = x; j < x + w; j++)
+      if (cur_img (i, j)) {
+        //#pragma omp task
+        if (i > 0 && j > 0) {
+          uint32_t m = max (cur_img (i - 1, j), cur_img (i, j - 1));
+          if (m > cur_img (i, j)) {
+            change     = 1;
+            cur_img (i, j) = m;
+          }
+        } else if (j > 0) {
+          uint32_t m = cur_img (i, j - 1);
+          if (m > cur_img (i, j)) {
+            change     = 1;
+            cur_img (i, j) = m;
+          }
+        } else if (i > 0) {
+          uint32_t m = cur_img (i - 1, j);
+          if (m > cur_img (i, j)) {
+            change     = 1;
+            cur_img (i, j) = m;
+          }
+        }
+      }
+
+  monitoring_end_tile_id (x, y, w, h, cpu, TASKID_DOWN_RIGHT);
+
+  return change;
+}
+
+// We propagate the max color up-left. This is the expensive implementation
+// which constantly checks border conditions...
+int tile_up_left_omp (int x, int y, int w, int h, int cpu)
+{
+  int change = 0;
+
+  monitoring_start_tile (cpu);
+  #pragma omp parallel for collapse (2) num_threads(16)
+  for (int i = y + h - 1; i >= y; i--)
+    for (int j = x + w - 1; j >= x; j--)
+      if (cur_img (i, j)) {
+        if (i < DIM - 1 && j < DIM - 1) {
+          uint32_t m = max (cur_img (i + 1, j), cur_img (i, j + 1));
+          if (m > cur_img (i, j)) {
+            change     = 1;
+            cur_img (i, j) = m;
+          }
+        } else if (j < DIM - 1) {
+          uint32_t m = cur_img (i, j + 1);
+          if (m > cur_img (i, j)) {
+            change     = 1;
+            cur_img (i, j) = m;
+          }
+        } else if (i < DIM - 1) {
+          uint32_t m = cur_img (i + 1, j);
+          if (m > cur_img (i, j)) {
+            change     = 1;
+            cur_img (i, j) = m;
+          }
+        }
+      }
+
+  monitoring_end_tile_id (x, y, w, h, cpu, TASKID_UP_LEFT);
+
+  return change;
+}
+
+
 ///////////////////////////// Simple sequential version (seq)
 // Suggested cmdline(s):
 // ./run -l images/spirale.png -k max -v seq
@@ -125,11 +201,11 @@ unsigned max_compute_tiled (unsigned nb_iter)
     // Bottom-right propagation
     for (int i = 0; i < NB_TILES_Y; i++)
       for (int j = 0; j < NB_TILES_X; j++)
-        change |= tile_down_right (j * TILE_W, i * TILE_H, TILE_W, TILE_H, 0);
+        change |= tile_down_right_omp (j * TILE_W, i * TILE_H, TILE_W, TILE_H, 0);
     // Up-left propagation
     for (int i = NB_TILES_Y - 1; i >= 0; i--)
       for (int j = NB_TILES_X - 1; j >= 0; j--)
-        change |= tile_up_left (j * TILE_W, i * TILE_H, TILE_W, TILE_H, 0);
+        change |= tile_up_left_omp (j * TILE_W, i * TILE_H, TILE_W, TILE_H, 0);
 
     if (!change) {
       res = it;
@@ -140,6 +216,42 @@ unsigned max_compute_tiled (unsigned nb_iter)
   return res;
 }
 
+///////////////////////////// Tiled sequential version (tiled)
+// Suggested cmdline(s):
+// ./run -l images/spirale.png -k max -v tiled -ts 32
+// ./run -s 2048 -k max -v tiled -a 100 -nt 16
+unsigned max_compute_task (unsigned nb_iter)
+{
+  unsigned res = 0;
+  int tuile[NB_TILES_Y][NB_TILES_X + 1] __attribute__ ((unused));
+
+  
+  for (unsigned it = 1; it <= nb_iter; it++) {
+    int change = 0;
+
+    // Bottom-right propagation
+    #pragma omp parallel
+    #pragma omp single
+    for (int i = 0; i < NB_TILES_Y; i++)
+      for (int j = 0; j < NB_TILES_X; j++)
+      #pragma omp task depend(in:tuile[i][j-1])depend(in:tuile[i-1][j])depend(out:tuile[i][j])
+        change |= tile_down_right_omp (j * TILE_W, i * TILE_H, TILE_W, TILE_H, omp_get_thread_num());
+    // Up-left propagation
+    #pragma omp parallel
+    #pragma omp single
+    for (int i = NB_TILES_Y - 1; i >= 0; i--)
+      for (int j = NB_TILES_X - 1; j >= 0; j--)
+      #pragma omp task depend(in:tuile[i][j+1])depend(in:tuile[i+1][j])depend(out:tuile[i][j])
+        change |= tile_up_left_omp (j * TILE_W, i * TILE_H, TILE_W, TILE_H, omp_get_thread_num());
+
+    if (!change) {
+      res = it;
+      break;
+    }
+  }
+
+  return res;
+}
 
 ///////////////////////////// Drawing functions
 
