@@ -30,52 +30,33 @@ int main (int argc, char **argv)
 #pragma omp task 
   for (i=0; i < T; i++ )
     for (j=0; j < T; j++ ){
-      if (i==T || j==T){
 
-      }
       if(i>0 && j==0){//bordure i
-        printf("bordure i\n");
-        if(i==T-1)  
-          #pragma omp task firstprivate(i,j)depend(in:A[i-1][0])\
-                                            depend(out:A[i][1])
-          tache(i,j);
-        else
-          #pragma omp task firstprivate(i,j)depend(in:A[i-1][0])\
-                                            depend(out:A[i][1])\
-                                            depend(out:A[i+1][0])
+          printf("bordure i\n");
+          #pragma omp  firstprivate(i,j)depend(in:A[i-1][0])\
+                                            depend(out:A[i][j])
           tache(i,j);
       }
+
       else if (i==0 && j>0){//bordure j
-        printf("bordure j\n");
-        if(j==T-1)
-          #pragma omp task firstprivate(i,j)depend(in:A[0][j-1])\
-                                            depend(out:A[1][j])
-                                            
-          tache(i,j);
-        else
-          #pragma omp task firstprivate(i,j)depend(in:A[0][j-1])\
-                                            depend(out:A[1][j])\
-                                            depend(out:A[0][j+1])
+          printf("bordure j\n");
+          #pragma omp  firstprivate(i,j)depend(in:A[0][j-1])\
+                                            depend(out:A[i][j])
           tache(i,j);
       }
+
       else if (i!=0 && j!=0){//cases internes
-        printf("cases internes\n");
-        if(i==T-1 && j==T-1)
-          #pragma omp task firstprivate(i,j)depend(in:A[i][j-1])\
-                                            depend(in:A[i-1][j])
-          tache(i,j);
-        else
-          #pragma omp task firstprivate(i,j)depend(in:A[i][j-1])\
+          printf("cases internes\n");
+
+          #pragma omp  firstprivate(i,j)depend(in:A[i][j-1])\
                                             depend(in:A[i-1][j])\
-                                            depend(out:A[i][j+1])\
-                                            depend(out:A[i+1][j])
+                                            depend(out:A[i][j])
           tache(i,j);
-        
       }
+
       else{ // i==0 && j==0 (premiere case)
         printf("premiere case\n");
-      #pragma omp task firstprivate(i,j)depend(out:A[i+1][j])\
-                                        depend(out:A[i][j+1])
+      #pragma omp  firstprivate(i,j)depend(out:A[i][j])
         tache(i,j);
       }
     }
