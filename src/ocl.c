@@ -105,8 +105,10 @@ static void ocl_show_config (int quit, int verbose)
   char *str        = NULL;
   cl_int err;
 
+#ifdef ENABLE_SDL
   if (do_display)
     glRenderer = (char *)glGetString (GL_RENDERER);
+#endif
 
   // Get list of platforms
   err = clGetPlatformIDs (MAX_PLATFORMS, pf, (cl_uint *)&nbp);

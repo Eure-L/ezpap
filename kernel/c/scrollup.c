@@ -27,6 +27,27 @@ unsigned scrollup_compute_seq (unsigned nb_iter)
   return 0;
 }
 
+///////////////////////////// Simple sequential version (seq)
+// Suggested cmdline(s):
+// ./run -l images/1024.png -k scrollup -v ji
+//
+unsigned scrollup_compute_ji (unsigned nb_iter)
+{
+  for (unsigned it = 1; it <= nb_iter; it++) {
+ 
+    for (int j = 0; j < DIM; j++) {
+      for (int i = 0; i < DIM; i++){
+        int src = (i < DIM - 1) ? i + 1 : 0;
+        next_img (i, j) = cur_img (src, j);
+      }
+    }
+    swap_images ();
+  }
+ 
+  return 0;
+}
+
+
 // Tile inner computation
 static void do_tile_reg (int x, int y, int width, int height)
 {

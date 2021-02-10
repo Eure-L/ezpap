@@ -8,7 +8,7 @@ easyspap_options["--kernel "] = ["rotation90"]
 easyspap_options["--iterations "] = [100]
 easyspap_options["--variant "] = ["omp_affinity",
                                   "omp_cache", "sched"]
-easyspap_options["--grain "] = [8, 16, 32]
+easyspap_options["--tile-size "] = [8, 16, 32]
 easyspap_options["--size "] = [512, 1024, 2048, 4096]
 
 omp_icv = {}  # OpenMP Internal Control Variables

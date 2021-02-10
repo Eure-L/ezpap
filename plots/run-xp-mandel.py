@@ -1,31 +1,39 @@
 #!/usr/bin/env python3
-
-from graphTools import *
 from expTools import *
-import os
 
-# Dictionnaire avec les options de compilations d'apres commande
-options = {}
-options["-k "] = ["mandel"]
-options["-i "] = [30]
-options["-v "] = ["omp_tiled"]
-options["-s "] = [1024]
-options["-g "] = [8, 16, 32, 64, 128]
-# Pour renseigner l'option '-of' il faut donner le chemin depuis le fichier easypap
-#options["-of "] = ["./plots/data/perf_data.csv"]
+easypapOptions = {
+    "-k ": ["mandel"],
+    "-i ": [10],
+    "-v ": ["omp_tiled"],
+    "-s ": [512, 1024],
+    "-ts ": [8, 16, 32],
+    "--label ": ["square"]
+}
 
+# OMP Internal Control Variable
+ompICV = {
+    "OMP_SCHEDULE=": ["static", "static,1", "dynamic"],
+    "OMP_NUM_THREADS=": [1] + list(range(2, 13, 2))
+}
 
-# Dictionnaire avec les options OMP
-ompenv = {}
-ompenv["OMP_NUM_THREADS="] = [1] + list(range(2, 13, 2))
-#ompenv["OMP_PLACES="] = ["cores", "threads"]
-
-nbrun = 2
+nbrun = 3
 # Lancement des experiences
-execute('./run ', ompenv, options, nbrun, verbose=False, easyPath=".")
+execute('./run ', ompICV, easypapOptions, nbrun, verbose=False, easyPath=".")
+
+del easypapOptions["-ts "]
+easypapOptions["--label "] = ["line"]
+easypapOptions["-th "] = [1]
+easypapOptions["-tw "] = [32, 64, 128, 256, 512]
+
+execute('./run ', ompICV, easypapOptions, nbrun, verbose=False, easyPath=".")
 
 # Lancement de la version seq avec le nombre de thread impose a 1
-options["-v "] = ["seq"]
-options["-g "] = [ 8 ]
-ompenv["OMP_NUM_THREADS="] = [1]
-execute('./run', ompenv, options, nbrun, verbose=False, easyPath=".")
+
+easypapOptions = {
+    "-k ": ["mandel"],
+    "-i ": [10],
+    "-v ": ["seq"],
+    "-s ": [512, 1024],
+}
+ompICV = {"OMP_NUM_THREADS=": [1]}
+#execute('./run ', ompICV, easypapOptions, nbrun, verbose=False, easyPath=".")

@@ -710,8 +710,10 @@ static void filter_args (int *argc, char *argv[])
       show_ocl_config = 1;
       opencl_used     = 1;
       do_display      = 0;
+#ifdef ENABLE_SDL
     } else if (!strcmp (*argv, "--show-iterations") || !strcmp (*argv, "-si")) {
       graphics_toggle_display_iteration_number ();
+#endif
     } else if (!strcmp (*argv, "--list-ocl-variants") ||
                !strcmp (*argv, "-lov")) {
       list_ocl_variants = 1;

@@ -20,5 +20,5 @@ sns.set(style="darkgrid", rc={'text.usetex': False,
 
 # Creation du graphe :
 fig = creerGraphique(df=df, args=args)
-
+fig.tight_layout()
 engeristrerGraphique(fig)
