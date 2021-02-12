@@ -319,8 +319,10 @@ static void init_phases (void)
   }
 
   // Make sure at leat one task id (0 = anonymous) is stored in the trace
+#ifdef ENABLE_TRACE
   if (do_trace)
     trace_record_commit_task_ids ();
+#endif
 
   // Allocate memory for cur_img and next_img images
   img_data_alloc ();

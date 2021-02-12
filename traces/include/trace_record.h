@@ -47,6 +47,7 @@ void trace_record_finalize (void);
 
 #define do_trace (unsigned)0
 
+#define trace_record_declare_task_ids(a) (void)0
 #define trace_record_start_iteration(t) (void)0
 #define trace_record_end_iteration(t) (void)0
 #define trace_record_start_tile(t, c) (void)0
