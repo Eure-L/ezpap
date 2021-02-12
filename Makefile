@@ -15,9 +15,6 @@ ENABLE_MPI			= 1
 
 ####################################
 
-#TP5
-CFLAGS                 += -O2 -Wall -Wno-unused-function -march=native
-
 ARCH		:= $(shell uname -s | tr a-z A-Z)
 
 ifdef ENABLE_SDL
