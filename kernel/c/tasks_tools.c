@@ -22,10 +22,10 @@ void printTask(task t){
 
 taskStack taskStackInit(void){
   taskStack stack;
-  stack.tasks = (task *) malloc(DIM*sizeof(task)); //Don't forget to Free
+  stack.tasks = (task *) malloc(((DIM*DIM)/(NB_TILES_X*NB_TILES_Y))*sizeof(task)); //Don't forget to Free
   stack.tasks[0].tile_x=-1;
   stack.tasks[0].tile_y=-1;
-  stack.stackSize=DIM;
+  stack.stackSize=((DIM*DIM)/(NB_TILES_X*NB_TILES_Y));
   stack.nbTasks=0;
   return stack;
 }

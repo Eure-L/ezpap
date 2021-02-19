@@ -18,6 +18,7 @@ static cell_t *restrict _table = NULL, *restrict _alternate_table = NULL;
 
 taskStack * tasks;
 unsigned it = 1;
+omp_lock_t writelock;
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
 {
@@ -116,7 +117,6 @@ unsigned life_compute_seq (unsigned nb_iter)
     if (!change)
       return it;
   }
-  printf("bite\n");
   return 0;
 }
 
@@ -173,7 +173,6 @@ unsigned life_compute_tiled (unsigned nb_iter)
 //////////////////////////////// Tiled omp version
 unsigned life_compute_omp_tiled (unsigned nb_iter)
 {
-    printf("bite2\n");
 
   unsigned res = 0;
 
@@ -218,19 +217,27 @@ static int lazy_compute_new_state (int y, int x, taskStack * stack)
     if(change){
       if(x > 0 && x/TILE_W == 0 ){
         task futureTask = createTask(x-1,y/TILE_H);
+        omp_set_lock(&writelock);
         stacking(stack,futureTask);
+        omp_unset_lock(&writelock);
       }
       else if (x<DIM-1 && (x%TILE_W == TILE_W-1)){
         task futureTask = createTask(x+1,y/TILE_H);
+        omp_set_lock(&writelock);
         stacking(stack,futureTask);
+        omp_unset_lock(&writelock);
       }
       if(y>0 && y/TILE_H==0){
         task futureTask = createTask(x/TILE_W,y-1);
+        omp_set_lock(&writelock);
         stacking(stack,futureTask);
+        omp_unset_lock(&writelock);
       }
       else if (y<DIM-1 && (y%TILE_H == TILE_H-1)){
         task futureTask = createTask(x/TILE_W,y+1);
+        omp_set_lock(&writelock);
         stacking(stack,futureTask);
+        omp_unset_lock(&writelock);
       }
     }
   }
@@ -244,9 +251,7 @@ static int lazy_do_tile_reg (int x, int y, int width, int height, taskStack * st
 
   for (int i = y; i < y + height; i++){
     for (int j = x; j < x + width; j++){
-      change |= lazy_compute_new_state (i, j,stack);
-      
-        
+      change |= lazy_compute_new_state (i, j,stack);     
     }
   }
 
@@ -300,6 +305,7 @@ unsigned life_compute_lazy (unsigned nb_iter)
   unsigned curr_tasks = 1;
   unsigned next_tasks = 0;
   unsigned change = 0;
+  omp_init_lock(&writelock);
 
   //We start by filling all the tiles in the stack of anticipated load 
   task startTask;
@@ -311,6 +317,7 @@ unsigned life_compute_lazy (unsigned nb_iter)
   }
 
   for (it = 1; it <= nb_iter; it++) {
+    printf("%d\n",it);
     curr_tasks = it % 2;
     next_tasks = (it+1)%2;
     #pragma omp parallel
@@ -325,11 +332,11 @@ unsigned life_compute_lazy (unsigned nb_iter)
         bool hasChanged = (lazy_do_tile (x, y, TILE_W, TILE_H, omp_get_thread_num(),&tasks[next_tasks]))? true : false;
         change|=hasChanged;
         if(!hasChanged){
-          #pragma omp critical
+          omp_set_lock(&writelock);
           stacking(&tasks[next_tasks],createTask(x,y));
+          omp_unset_lock(&writelock);
         }
       }
-      
     }
     tasks[curr_tasks].nbTasks = 0;
     swap_tables ();
@@ -337,7 +344,6 @@ unsigned life_compute_lazy (unsigned nb_iter)
       res = it;
       break;
     }
-    it++;
   }
   taskStackDelete(&tasks[0]);
   taskStackDelete(&tasks[1]);
