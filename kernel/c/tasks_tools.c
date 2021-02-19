@@ -16,6 +16,10 @@ task createTask(int x, int y){
     return newTask;
 }
 
+void printTask(task t){
+  printf("(%d,%d) - ",t.tile_x,t.tile_y);
+}
+
 taskStack taskStackInit(void){
   taskStack stack;
   stack.tasks = (task *) malloc(DIM*sizeof(task)); //Don't forget to Free
@@ -31,7 +35,6 @@ void taskStackDelete(taskStack * stack){
 }
 
 void stacking(taskStack * stack, task taskToStack){
-  
   if(stack->nbTasks==stack->stackSize){
     stack->stackSize = stack->stackSize * 2;
     stack->tasks = realloc(stack->tasks,stack->stackSize*sizeof(task));
@@ -45,32 +48,18 @@ void stacking(taskStack * stack, task taskToStack){
   stack->tasks[stack->nbTasks-1].tile_y = taskToStack.tile_y;
 }
 
-task poping(taskStack * stack){
+void poping(taskStack * stack){
   if(stack->nbTasks<=0)
     printf("Can't pop it more\n");
-  stack->nbTasks--;
-  return stack->tasks[stack->nbTasks];
+  stack->nbTasks-=1; 
 }
 
 void printTaskStack(taskStack * stack){
-    int x = DIM/TILE_W;
-    int y = DIM/TILE_H;
-    bool table[x][y];
-    for(int i = 0 ; i < x; i++){
-        for(int j=0 ; j < y ; j++){
-            table[i][j]=false;
-        }
-    }
+    
     for(int ptr=0;ptr<(*stack).nbTasks;ptr++){
-        x = ((*stack).tasks->tile_x)/TILE_W;
-        y = ((*stack).tasks->tile_y)/TILE_H;
-        table[x][y] = true;
+      printTask((*stack).tasks[ptr]);
     }
-    for(int i = 0 ; i < x; i++){
-        for(int j=0 ; j < y ; j++){
-            printf("%d ",table[i][j]);
-        }
-        printf("\n");
-    }
+    printf("\n");
+    
 }
 

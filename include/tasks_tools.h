@@ -19,6 +19,13 @@ struct taskStack_t{
 task createTask(int x, int y);
 
 /**
+ * @brief 
+ * 
+ * @param t 
+ */
+void printTask(task t);
+
+/**
  * @brief Initializer for the structure taskstack
  * 
  * @return stack
@@ -48,7 +55,7 @@ void stacking(taskStack * stack, task taskToStack);
  * @param stack 
  * @return task 
  */
-task poping(taskStack * stack);
+void poping(taskStack * stack);
 
 /**
  * @brief 
