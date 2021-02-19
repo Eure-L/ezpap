@@ -10,11 +10,27 @@ struct taskStack_t{
 };typedef struct taskStack_t taskStack;
 
 /**
+ * @brief Create a Task object
+ * 
+ * @param x 
+ * @param y 
+ * @return task 
+ */
+task createTask(int x, int y);
+
+/**
  * @brief Initializer for the structure taskstack
  * 
  * @return stack
  */
 taskStack taskStackInit(void);
+
+/**
+ * @brief 
+ * 
+ * @param stack 
+ */
+void taskStackDelete(taskStack * stack);
 
 /**
  * @brief Stack a given task, uses pointer arithmetics
@@ -24,7 +40,7 @@ taskStack taskStackInit(void);
  * @param taskToStack 
  * @return taskStack* 
  */
-void stacking(taskStack stack, task taskToStack);
+void stacking(taskStack * stack, task taskToStack);
 
 /**
  * @brief Pops a given Stack returning a task
@@ -32,5 +48,13 @@ void stacking(taskStack stack, task taskToStack);
  * @param stack 
  * @return task 
  */
-task poping(taskStack stack);
+task poping(taskStack * stack);
+
+/**
+ * @brief 
+ * 
+ * @param stack 
+ */
+void printTaskStack(taskStack * stack);
+
 

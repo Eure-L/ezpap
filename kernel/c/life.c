@@ -1,8 +1,7 @@
 
 #include "easypap.h"
 #include "rle_lexer.h"
-#include "lazy.c"
-
+#include "tasks_tools.h"
 
 #include <omp.h>
 #include <stdbool.h>
@@ -16,6 +15,9 @@ static unsigned color = 0xFFFF00FF; // Living cells have the yellow color
 typedef unsigned cell_t;
 
 static cell_t *restrict _table = NULL, *restrict _alternate_table = NULL;
+
+taskStack * tasks;
+unsigned it = 1;
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
 {
@@ -194,66 +196,155 @@ unsigned life_compute_omp_tiled (unsigned nb_iter)
   return res;
 }
 
+static int lazy_compute_new_state (int y, int x, taskStack * stack)
+{
+  unsigned n      = 0;
+  unsigned me     = cur_table (y, x) != 0;
+  unsigned change = 0;
+
+  if (x > 0 && x < DIM - 1 && y > 0 && y < DIM - 1) {
+
+    for (int i = y - 1; i <= y + 1; i++)
+      for (int j = x - 1; j <= x + 1; j++)
+        n += cur_table (i, j);
+
+    n = (n == 3 + me) | (n == 3);
+    if (n != me)
+      change |= 1;
+
+    next_table (y, x) = n;
+    //preloading potential load for all cells on the border of the tiles
+    if(change){
+      if(x > 0 && x/TILE_W == 0 ){
+        task futureTask = createTask(x-1,y/TILE_H);
+        stacking(stack,futureTask);
+      }
+      else if (x<DIM-1 && (x%TILE_W == TILE_W-1)){
+        task futureTask = createTask(x+1,y/TILE_H);
+        stacking(stack,futureTask);
+      }
+      if(y>0 && y/TILE_H==0){
+        task futureTask = createTask(x/TILE_W,y-1);
+        stacking(stack,futureTask);
+      }
+      else if (y<DIM-1 && (y%TILE_H == TILE_H-1)){
+        task futureTask = createTask(x/TILE_W,y+1);
+        stacking(stack,futureTask);
+      }
+    }
+  }
+
+  return change;
+}
+
+static int lazy_do_tile_reg (int x, int y, int width, int height, taskStack * stack)
+{
+  int change = 0;
+
+  for (int i = y; i < y + height; i++){
+    for (int j = x; j < x + width; j++){
+      change |= lazy_compute_new_state (i, j,stack);
+      
+        
+    }
+  }
+
+
+  return change;
+}
+
+static int lazy_do_tile (int x, int y, int width, int height, int who,taskStack * stack)
+{
+  int r;
+
+  monitoring_start_tile (who);
+
+  r = lazy_do_tile_reg (x, y, width, height,stack);
+
+  monitoring_end_tile (x, y, width, height, who);
+
+  return r;
+}
+
+unsigned lazy_life_compute_omp_tiled (unsigned nb_iter,taskStack * stack)
+{
+    printf("bite2\n");
+
+  unsigned res = 0;
+
+  for (unsigned it = 1; it <= nb_iter; it++) {
+    unsigned change = 0;
+    #pragma omp parallel
+    #pragma omp single
+    for (int y = 0; y < DIM; y += TILE_H)
+      for (int x = 0; x < DIM; x += TILE_W)
+        #pragma omp task
+        change |= lazy_do_tile (x, y, TILE_W, TILE_H, omp_get_thread_num(),stack);
+
+    swap_tables ();
+
+    if (!change) { // we stop when all cells are stable
+      res = it;
+      break;
+    }
+  }
+
+  return res;
+}
+
 //////////////////////// lazy version
 unsigned life_compute_lazy (unsigned nb_iter)
 {
-  unsigned res = 0;
-  taskStack tasks[2]; 
+  unsigned  res = 0;
+  tasks = (taskStack *) malloc (2 * sizeof(taskStack));
   tasks[0]=taskStackInit(); // one stack of tasks for the threads to pick
-  tasks[1]=taskStackInit(); // an other one for the threads to foresee the load in the next itteration
+  tasks[1]=taskStackInit(); // an other one for the threads to foresee the load in the next itteration 
   unsigned curr_tasks = 1;
   unsigned next_tasks = 0;
   unsigned change = 0;
+  printTaskStack(&tasks[curr_tasks]);
+  if(it==1){
+    res = lazy_life_compute_omp_tiled(1,&tasks[next_tasks]);
+    it ++;
+  }
+  else{  
+    for (it = 0; it <= nb_iter; it++) {
+      printf("itteration:%d, nb iter : %d\n",it,nb_iter);
+      curr_tasks = it % 2;
+      next_tasks = (it+1)%2;
+      
 
-  //Initialisation Secion
-  #pragma omp parallel
-  #pragma omp single
-  for (int y = 0; y < DIM; y += TILE_H)
-    for (int x = 0; x < DIM; x += TILE_W)
-      #pragma omp task
-      {
-        bool hasChanged = (do_tile (x, y, TILE_W, TILE_H, omp_get_thread_num()))? true : false;
-        change |= hasChanged;
-        if(hasChanged){
-          task futureTask;
-          futureTask.tile_x=x;
-          futureTask.tile_y=y;
-          #pragma omp critical
-          stacking(tasks[next_tasks],futureTask);
+      #pragma omp parallel
+      #pragma omp single
+      for(int ptr=0;ptr<tasks[curr_tasks].nbTasks;ptr++){
+        task toDo = poping(&tasks[curr_tasks]);
+        int x = toDo.tile_x;
+        int y = toDo.tile_y;
+        #pragma omp task
+        {
+          bool hasChanged = (lazy_do_tile (x, y, TILE_W, TILE_H, omp_get_thread_num(),&tasks[next_tasks]))? true : false;
+          change|=hasChanged;
+          if(hasChanged){
+            task futureTask;
+            futureTask.tile_x=x;
+            futureTask.tile_y=y;
+            #pragma omp critical
+            stacking(&tasks[next_tasks],futureTask);
+            
+          }
         }
       }
-  swap_tables ();
-  for (unsigned it = 1; it <= nb_iter; it++) {
-    //printf("itteration:%d, nb iter : %d\n",it,nb_iter);
-    curr_tasks = it % 2;
-    next_tasks = (it+1)%2;
-
-    #pragma omp parallel
-    #pragma omp single
-    for(int ptr=0;ptr<tasks[curr_tasks].nbTasks;ptr++){
-      task toDo = poping(tasks[curr_tasks]);
-      int x = toDo.tile_x;
-      int y = toDo.tile_y;
-      #pragma omp task
-      {
-        bool hasChanged = (do_tile (x, y, TILE_W, TILE_H, omp_get_thread_num()))? true : false;
-        change|=hasChanged;
-        if(hasChanged){
-          task futureTask;
-          futureTask.tile_x=x;
-          futureTask.tile_y=y;
-          #pragma omp critical
-          stacking(tasks[next_tasks],futureTask);
-          
-        }
+      swap_tables ();
+      if (!change) { // we stop when all cells are stable
+        res = it;
+        break;
       }
-    }
-    swap_tables ();
-    if (!change) { // we stop when all cells are stable
-      res = it;
-      //break;
+      it++;
     }
   }
+  taskStackDelete(&tasks[0]);
+  taskStackDelete(&tasks[1]);
+  free(tasks);
   return res;
 }
 
