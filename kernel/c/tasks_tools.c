@@ -34,7 +34,7 @@ void taskStackDelete(taskStack * stack){
   free(stack->tasks);
 }
 
-void stacking(taskStack * stack, task taskToStack){
+void addTask(taskStack * stack, task taskToStack){
   if(stack->nbTasks==stack->stackSize){
     stack->stackSize = stack->stackSize * 2;
     stack->tasks = realloc(stack->tasks,stack->stackSize*sizeof(task));
@@ -46,12 +46,15 @@ void stacking(taskStack * stack, task taskToStack){
   stack->nbTasks += 1;
   stack->tasks[stack->nbTasks-1].tile_x = taskToStack.tile_x;
   stack->tasks[stack->nbTasks-1].tile_y = taskToStack.tile_y;
+  printf("adding task\n");
+
 }
 
-void poping(taskStack * stack){
+void delStack(taskStack * stack){
   if(stack->nbTasks<=0)
     printf("Can't pop it more\n");
-  stack->nbTasks-=1; 
+  //task null = createTask(0,0);
+  stack->nbTasks=0; 
 }
 
 void printTaskStack(taskStack * stack){

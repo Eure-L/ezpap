@@ -47,7 +47,7 @@ void taskStackDelete(taskStack * stack);
  * @param taskToStack 
  * @return taskStack* 
  */
-void stacking(taskStack * stack, task taskToStack);
+void addTask(taskStack * stack, task taskToStack);
 
 /**
  * @brief Pops a given Stack returning a task
@@ -55,7 +55,7 @@ void stacking(taskStack * stack, task taskToStack);
  * @param stack 
  * @return task 
  */
-void poping(taskStack * stack);
+void delStack(taskStack * stack);
 
 /**
  * @brief 
