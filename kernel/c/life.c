@@ -315,6 +315,7 @@ unsigned life_compute_lazy (unsigned nb_iter)
     tasks[0]=taskStackInit(); // one stack of tasks for the threads to pick
     tasks[1]=taskStackInit(); // an other one for the threads to foresee the load in the next itteration 
     omp_init_lock(&writelock);
+
     //We start by filling all the tiles in the stack of anticipated load 
     task startTask;
     for(int i=0;i<NB_TILES_X;i++){
@@ -350,10 +351,7 @@ unsigned life_compute_lazy (unsigned nb_iter)
       }
       //#pragma omp taskwait
     }
-    // printf("---------------------current tasks : -----------\n");
-    // printTaskStack(tasks+curr_tasks);
-    // printf("\n\n\n---------------------FUTURE tasks : -----------\n");
-    // printTaskStack(tasks+next_tasks);
+
     delStack(tasks+curr_tasks);
     
     swap_tables ();
@@ -361,13 +359,16 @@ unsigned life_compute_lazy (unsigned nb_iter)
     if (tasks[next_tasks].nbTasks == 0) { // we stop when all cells are stable
       res = it;
       printf("there's no future tasks\n");
+      omp_destroy_lock(&writelock);
+      
+      taskStackDelete(&tasks[0]);
+      taskStackDelete(&tasks[1]);
+      free(tasks);
       break;
     }
     switcher = ! switcher;
   }
-  //taskStackDelete(&tasks[0]);
-  //taskStackDelete(&tasks[1]);
-  //free(tasks);
+  
   return res;
 }
 
