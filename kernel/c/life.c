@@ -197,6 +197,26 @@ unsigned life_compute_omp_tiled (unsigned nb_iter)
   return res;
 }
 
+bool isOnLeft(int x,int y){
+  return x > 0 && x%TILE_W == 0;
+}
+bool isOnRight(int x,int y){
+  return (x<DIM-1 && (x%TILE_W == TILE_W-1));
+}
+bool isOnTop(int x,int y){
+  return (y>0 && y%TILE_H==0);
+}
+bool isOnBottom(int x,int y){
+  return (y<DIM-1 && (y%TILE_H == TILE_H-1));
+}
+
+void addCreateTask(int x, int y, taskStack * stack){
+        task futureTask = createTask(x,y);
+        omp_set_lock(&writelock);
+        addTask(stack,futureTask);
+        omp_unset_lock(&writelock);
+}
+
 static int lazy_compute_new_state (int y, int x, taskStack * stack)
 {
   unsigned n      = 0;
@@ -214,39 +234,33 @@ static int lazy_compute_new_state (int y, int x, taskStack * stack)
       change |= 1;
 
     next_table (y, x) = n;
+    
     //preloading potential load for all cells on the border of the tiles
     if(change == 1){
-      if(x > 0 && x%TILE_W == 0 ){
-        task futureTask = createTask(x-TILE_W,(y/TILE_H)*TILE_H);
-        // printf("1# %d,%d#",x,y);
-        // printTask(futureTask);
-        omp_set_lock(&writelock);
-        addTask(stack,futureTask);
-        omp_unset_lock(&writelock);
+      bool left = isOnLeft(x,y);
+      bool right = isOnRight(x,y);
+      bool top = isOnTop(x,y);
+      bool bottom = isOnBottom(x,y);
+
+      if(left){
+        addCreateTask(x-TILE_W,(y/TILE_H)*TILE_H,stack);    
+        if(top)
+          addCreateTask(x-TILE_W,y-TILE_H,stack);
+        else if(bottom)
+          addCreateTask(x-TILE_W,y+1,stack);
       }
-      else if (x<DIM-1 && (x%TILE_W == TILE_W-1)){
-        task futureTask = createTask(x+1,(y/TILE_H)*TILE_H);
-        // printf("2# %d,%d#",x,y);
-        // printTask(futureTask);
-        omp_set_lock(&writelock);
-        addTask(stack,futureTask);
-        omp_unset_lock(&writelock);
+      else if (right){
+        addCreateTask(x+1,(y/TILE_H)*TILE_H,stack);  
+        if(top)
+          addCreateTask(x+1,y-TILE_H,stack);
+        else if(bottom)
+          addCreateTask(x+1,y+1,stack);   
       }
-      if(y>0 && y%TILE_H==0){
-        task futureTask = createTask((x/TILE_W)*TILE_W,y-TILE_H);
-        // printf("3# %d,%d#",x,y);
-        // printTask(futureTask);
-        omp_set_lock(&writelock);
-        addTask(stack,futureTask);
-        omp_unset_lock(&writelock);
+      if(top){
+        addCreateTask((x/TILE_W)*TILE_W,y-TILE_H,stack);   
       }
-      else if (y<DIM-1 && (y%TILE_H == TILE_H-1)){
-        task futureTask = createTask((x/TILE_W)*TILE_W,y+1);
-        // printf("4# %d,%d#",x,y);
-        // printTask(futureTask);
-        omp_set_lock(&writelock);
-        addTask(stack,futureTask);
-        omp_unset_lock(&writelock);
+      else if (bottom){
+        addCreateTask((x/TILE_W)*TILE_W,y+1,stack);
       }
     }
   }
@@ -349,7 +363,7 @@ unsigned life_compute_lazy (unsigned nb_iter)
 
         }
       }
-      //#pragma omp taskwait
+      #pragma omp taskwait
     }
 
     delStack(tasks+curr_tasks);
