@@ -46,7 +46,7 @@ void addTask(taskStack * stack, task taskToStack){
   stack->nbTasks += 1;
   stack->tasks[stack->nbTasks-1].tile_x = taskToStack.tile_x;
   stack->tasks[stack->nbTasks-1].tile_y = taskToStack.tile_y;
-  printf("adding task\n");
+  //printf("adding task\n");
 
 }
 
