@@ -19,6 +19,8 @@ static cell_t *restrict _table = NULL, *restrict _alternate_table = NULL;
 taskStack * tasks;
 bool init = true;
 bool switcher = 1;
+unsigned curr_tasks = 1;
+unsigned next_tasks = 0;
 omp_lock_t writelock;
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
@@ -210,14 +212,14 @@ bool isOnBottom(int x,int y){
   return (y<DIM-1 && (y%TILE_H == TILE_H-1));
 }
 
-void addCreateTask(int x, int y, taskStack * stack){
+void addCreateTask(int x, int y){
         task futureTask = createTask(x,y);
         omp_set_lock(&writelock);
-        addTask(stack,futureTask);
+        addTask(tasks+next_tasks,futureTask);
         omp_unset_lock(&writelock);
 }
 
-static int lazy_compute_new_state (int y, int x, taskStack * stack)
+static int lazy_compute_new_state (int y, int x)
 {
   unsigned n      = 0;
   unsigned me     = cur_table (y, x) != 0;
@@ -243,24 +245,24 @@ static int lazy_compute_new_state (int y, int x, taskStack * stack)
       bool bottom = isOnBottom(x,y);
 
       if(left){
-        addCreateTask(x-TILE_W,(y/TILE_H)*TILE_H,stack);    
+        addCreateTask(x-TILE_W,(y/TILE_H)*TILE_H);    
         if(top)
-          addCreateTask(x-TILE_W,y-TILE_H,stack);
+          addCreateTask(x-TILE_W,y-TILE_H);
         else if(bottom)
-          addCreateTask(x-TILE_W,y+1,stack);
+          addCreateTask(x-TILE_W,y+1);
       }
       else if (right){
-        addCreateTask(x+1,(y/TILE_H)*TILE_H,stack);  
+        addCreateTask(x+1,(y/TILE_H)*TILE_H);  
         if(top)
-          addCreateTask(x+1,y-TILE_H,stack);
+          addCreateTask(x+1,y-TILE_H);
         else if(bottom)
-          addCreateTask(x+1,y+1,stack);   
+          addCreateTask(x+1,y+1);   
       }
       if(top){
-        addCreateTask((x/TILE_W)*TILE_W,y-TILE_H,stack);   
+        addCreateTask((x/TILE_W)*TILE_W,y-TILE_H);   
       }
       else if (bottom){
-        addCreateTask((x/TILE_W)*TILE_W,y+1,stack);
+        addCreateTask((x/TILE_W)*TILE_W,y+1);
       }
     }
   }
@@ -268,60 +270,34 @@ static int lazy_compute_new_state (int y, int x, taskStack * stack)
   return change;
 }
 
-static int lazy_do_tile_reg (int x, int y, int width, int height, taskStack * stack)
+static int lazy_do_tile_reg (int x, int y, int width, int height)
 {
   int change = 0;
 
   for (int i = y; i < y + height; i++){
     for (int j = x; j < x + width; j++){
-      change |= lazy_compute_new_state (i, j,stack);     
+      change |= lazy_compute_new_state (i, j);     
     }
   }
   return change;
 }
 
-static int lazy_do_tile (int x, int y, int width, int height, int who,taskStack * stack)
+static int lazy_do_tile (int x, int y, int width, int height, int who)
 {
   int r;
 
   monitoring_start_tile (who);
 
-  r = lazy_do_tile_reg (x, y, width, height,stack);
+  r = lazy_do_tile_reg (x, y, width, height);
 
   monitoring_end_tile (x, y, width, height, who);
 
   return r;
 }
 
-unsigned lazy_life_compute_omp_tiled (unsigned nb_iter,taskStack * stack)
-{
-  unsigned res = 0;
-  for (unsigned it = 1; it <= nb_iter; it++) {
-    unsigned change = 0;
-    #pragma omp parallel
-    #pragma omp single
-    for (int y = 0; y < DIM; y += TILE_H)
-      for (int x = 0; x < DIM; x += TILE_W)
-        #pragma omp task
-        change |= lazy_do_tile (x, y, TILE_W, TILE_H, omp_get_thread_num(),stack);
-
-    swap_tables ();
-
-    if (!change) { // we stop when all cells are stable
-      res = it;
-      break;
-    }
-  }
-
-  return res;
-}
-
 //////////////////////// lazy version
 unsigned life_compute_lazy (unsigned nb_iter)
 {
-  //printf("%d\n",it);
-  unsigned curr_tasks = 1;
-  unsigned next_tasks = 0;
   unsigned  res = 0;
 
   if(init){
@@ -354,7 +330,7 @@ unsigned life_compute_lazy (unsigned nb_iter)
       int y = tasks[curr_tasks].tasks[taskNum].tile_y ;
       #pragma omp task
        {
-        bool tileChange = lazy_do_tile (x, y, TILE_W, TILE_H, omp_get_thread_num(),&tasks[next_tasks]);
+        bool tileChange = lazy_do_tile (x, y, TILE_W, TILE_H, omp_get_thread_num());
         change |= tileChange;
         if(tileChange){
           omp_set_lock(&writelock);
