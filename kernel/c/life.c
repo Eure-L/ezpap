@@ -1,7 +1,6 @@
-
 #include "easypap.h"
 #include "rle_lexer.h"
-#include "tasks_tools.h"
+#include "toolbox.h"
 
 #include <omp.h>
 #include <stdbool.h>
@@ -21,7 +20,10 @@ bool init = true;
 bool switcher = 1;
 unsigned curr_tasks = 1;
 unsigned next_tasks = 0;
-omp_lock_t writelock;
+omp_lock_t * writelock;
+
+char *** bitMapTls; // Two Bit maps
+                    // Each bits representing a tile to compute
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
 {
@@ -103,8 +105,6 @@ static int compute_new_state (int y, int x)
 unsigned life_compute_seq (unsigned nb_iter)
 {
   for (unsigned it = 1; it <= nb_iter; it++) {
-    
-
     int change = 0;
 
     monitoring_start_tile (0);
@@ -115,11 +115,12 @@ unsigned life_compute_seq (unsigned nb_iter)
 
     monitoring_end_tile (0, 0, DIM, DIM, 0);
 
-    //swap_tables ();
+    swap_tables ();
 
     if (!change)
       return it;
   }
+
   return 0;
 }
 
@@ -195,28 +196,14 @@ unsigned life_compute_omp_tiled (unsigned nb_iter)
       break;
     }
   }
-
   return res;
-}
-
-bool isOnLeft(int x,int y){
-  return x > 0 && x%TILE_W == 0;
-}
-bool isOnRight(int x,int y){
-  return (x<DIM-1 && (x%TILE_W == TILE_W-1));
-}
-bool isOnTop(int x,int y){
-  return (y>0 && y%TILE_H==0);
-}
-bool isOnBottom(int x,int y){
-  return (y<DIM-1 && (y%TILE_H == TILE_H-1));
 }
 
 void addCreateTask(int x, int y){
         task futureTask = createTask(x,y);
-        omp_set_lock(&writelock);
+        omp_set_lock(writelock);
         addTask(tasks+next_tasks,futureTask);
-        omp_unset_lock(&writelock);
+        omp_unset_lock(writelock);
 }
 
 static int lazy_compute_new_state (int y, int x)
@@ -296,26 +283,16 @@ static int lazy_do_tile (int x, int y, int width, int height, int who)
 }
 
 //////////////////////// lazy version
-unsigned life_compute_lazy (unsigned nb_iter)
+unsigned life_compute_lazy(unsigned nb_iter)
 {
   unsigned  res = 0;
 
   if(init){
-    tasks = (taskStack *) malloc (2 * sizeof(taskStack));
-    tasks[0]=taskStackInit(); // one stack of tasks for the threads to pick
-    tasks[1]=taskStackInit(); // an other one for the threads to foresee the load in the next itteration 
-    omp_init_lock(&writelock);
-
-    //We start by filling all the tiles in the stack of anticipated load 
-    task startTask;
-    for(int i=0;i<NB_TILES_X;i++){
-      for(int j=0;j<NB_TILES_Y;j++){
-        startTask = createTask(i* TILE_W,j* TILE_H);
-        addTask(&tasks[curr_tasks],startTask);
-      }
-    }
+    writelock = (omp_lock_t *) malloc(sizeof(omp_lock_t));
+    tasks = initStacks(writelock,curr_tasks);
     init=false;
   }
+
   for (unsigned it = 1; it <= nb_iter; it++) {
     curr_tasks = switcher;
     next_tasks = !switcher;
@@ -323,34 +300,31 @@ unsigned life_compute_lazy (unsigned nb_iter)
     unsigned nbTsk  =tasks[curr_tasks].nbTasks;
 
     #pragma omp parallel for schedule(dynamic)
-    //#pragma omp single
     for (unsigned taskNum = 0; taskNum < nbTsk; taskNum++){
-
       int x = tasks[curr_tasks].tasks[taskNum].tile_x ;
       int y = tasks[curr_tasks].tasks[taskNum].tile_y ;
+
       #pragma omp task
        {
         bool tileChange = lazy_do_tile (x, y, TILE_W, TILE_H, omp_get_thread_num());
         change |= tileChange;
         if(tileChange){
-          omp_set_lock(&writelock);
+          omp_set_lock(writelock);
           addTask(&tasks[next_tasks],createTask(x,y));
-          omp_unset_lock(&writelock);
-
+          omp_unset_lock(writelock);
         }
       }
       #pragma omp taskwait
     }
 
-    delStack(tasks+curr_tasks);
-    
+    delStack(tasks+curr_tasks);   
     swap_tables ();
 
     if (tasks[next_tasks].nbTasks == 0) { // we stop when all cells are stable
       res = it;
       printf("there's no future tasks\n");
-      omp_destroy_lock(&writelock);
-      
+      omp_destroy_lock(writelock);
+
       taskStackDelete(&tasks[0]);
       taskStackDelete(&tasks[1]);
       free(tasks);
@@ -362,6 +336,29 @@ unsigned life_compute_lazy (unsigned nb_iter)
   return res;
 }
 
+//////////////////////// BitMap Version ;
+unsigned life_compute_lazybtmp (unsigned nb_iter){
+  unsigned change = 0;
+    
+  if(init){
+    omp_init_lock(writelock);
+    initBtmptls(bitMapTls);
+    init=false;
+  }
+  for (int y = 0; y < DIM; y += TILE_H)
+    for (int x = 0; x < DIM; x += TILE_W)
+      #pragma omp task
+      change |= do_tile (x, y, TILE_W, TILE_H, omp_get_thread_num());
+
+  swap_tables ();
+
+  if (!change) { // we stop when all cells are stable
+    
+    //break;
+  }
+
+return 1;
+}
 ///////////////////////////// Initial configs
 
 void life_draw_guns (void);

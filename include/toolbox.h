@@ -1,3 +1,6 @@
+#include <omp.h>
+#include <stdbool.h>
+
 struct task_t{
   int tile_x;
   int tile_y;
@@ -64,4 +67,14 @@ void delStack(taskStack * stack);
  */
 void printTaskStack(taskStack * stack);
 
+bool isOnLeft(int x,int y);
 
+bool isOnRight(int x,int y);
+
+bool isOnTop(int x,int y);
+
+bool isOnBottom(int x,int y);
+
+taskStack * initStacks( omp_lock_t * lock, int curr_tasks);
+
+void initBtmptls(char *** map);
