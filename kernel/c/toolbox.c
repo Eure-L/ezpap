@@ -95,18 +95,22 @@ taskStack * initStacks(omp_lock_t * lock, int curr_tasks){
     return tasks;
 }
 
-void initBtmptls(char *** map){
-  map = (char ***) malloc (2 * sizeof(char **));
+char *** initBtmptls(omp_lock_t * lock,int curr_tasks){
+  
+  char *** map = (char ***) malloc (2 * sizeof(char **));
+  omp_init_lock(lock);
   if(map == NULL){
     printf("map pointer NULL\n");
     exit(EXIT_FAILURE);
-  }             
+  }     
+         
   map[0] = (char **) malloc (NB_TILES_X * sizeof(char *));            
   map[1] = (char **) malloc (NB_TILES_X * sizeof(char *));
   if(map[0] == NULL || map[1]==NULL){
     printf("map second pointer is NULL\n");
     exit(EXIT_FAILURE);
-  }             
+  }     
+
   int idMap;
   for (int i=0;i<2*NB_TILES_X;i++){
     idMap = i/NB_TILES_X;                             
@@ -114,10 +118,16 @@ void initBtmptls(char *** map){
     if(map[idMap][i] == NULL){
       printf("map third pointer is NULL : idMap = %d & i = %d\n",idMap,i);
       exit(EXIT_FAILURE);
-    } 
-    for(int j=0;j<NB_TILES_Y;j++)
-      map[idMap][i][j] = 1;
+    }
+
+    for(int j=0;j<NB_TILES_Y;j++){
+      if(idMap==curr_tasks)
+        map[idMap][i][j] = 1;
+      else
+        map[idMap][i][j] = 0;
+    }
   }
+  return map;
 }
 
 

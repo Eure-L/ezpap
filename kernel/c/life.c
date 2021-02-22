@@ -282,23 +282,25 @@ static int lazy_do_tile (int x, int y, int width, int height, int who)
   return r;
 }
 
-//////////////////////// lazy version
+//////////////////////// first lazy version
 unsigned life_compute_lazy(unsigned nb_iter)
 {
   unsigned  res = 0;
 
-  if(init){
+  if(init){ // init section of the data structures
     writelock = (omp_lock_t *) malloc(sizeof(omp_lock_t));
     tasks = initStacks(writelock,curr_tasks);
     init=false;
   }
 
+  //Main loop
   for (unsigned it = 1; it <= nb_iter; it++) {
     curr_tasks = switcher;
     next_tasks = !switcher;
     unsigned change = 0;
     unsigned nbTsk  =tasks[curr_tasks].nbTasks;
 
+    //Distribution of the task creation process amongst every threads (might not be the best)
     #pragma omp parallel for schedule(dynamic)
     for (unsigned taskNum = 0; taskNum < nbTsk; taskNum++){
       int x = tasks[curr_tasks].tasks[taskNum].tile_x ;
@@ -308,10 +310,9 @@ unsigned life_compute_lazy(unsigned nb_iter)
        {
         bool tileChange = lazy_do_tile (x, y, TILE_W, TILE_H, omp_get_thread_num());
         change |= tileChange;
-        if(tileChange){
-          omp_set_lock(writelock);
-          addTask(&tasks[next_tasks],createTask(x,y));
-          omp_unset_lock(writelock);
+        
+        if(tileChange){       //if the tile change, we'll compute it again in the
+          addCreateTask(x,y); //next itteration
         }
       }
       #pragma omp taskwait
@@ -323,11 +324,6 @@ unsigned life_compute_lazy(unsigned nb_iter)
     if (tasks[next_tasks].nbTasks == 0) { // we stop when all cells are stable
       res = it;
       printf("there's no future tasks\n");
-      omp_destroy_lock(writelock);
-
-      taskStackDelete(&tasks[0]);
-      taskStackDelete(&tasks[1]);
-      free(tasks);
       break;
     }
     switcher = ! switcher;
@@ -336,25 +332,23 @@ unsigned life_compute_lazy(unsigned nb_iter)
   return res;
 }
 
-//////////////////////// BitMap Version ;
+//////////////////////// BitMap lazy Version ; (UNFINISHED auxillairy functions todo)
 unsigned life_compute_lazybtmp (unsigned nb_iter){
+  
   unsigned change = 0;
     
-  if(init){
-    omp_init_lock(writelock);
-    initBtmptls(bitMapTls);
+  if(init){ // init section of the data structures 
+    writelock = (omp_lock_t *) malloc(sizeof(omp_lock_t));
+    bitMapTls = initBtmptls(writelock,bitMapTls);
     init=false;
   }
-  for (int y = 0; y < DIM; y += TILE_H)
-    for (int x = 0; x < DIM; x += TILE_W)
-      #pragma omp task
-      change |= do_tile (x, y, TILE_W, TILE_H, omp_get_thread_num());
+
+  //MainLoop TODO
 
   swap_tables ();
 
   if (!change) { // we stop when all cells are stable
-    
-    //break;
+    //
   }
 
 return 1;
