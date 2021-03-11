@@ -11,7 +11,7 @@
 
 static unsigned color = 0xFFFF00FF; // Living cells have the yellow color
 
-typedef unsigned cell_t;
+typedef char cell_t;
 
 static cell_t *restrict _table = NULL, *restrict _alternate_table = NULL;
 
@@ -21,9 +21,13 @@ bool switcher = 1;
 unsigned curr_tasks = 1;
 unsigned next_tasks = 0;
 omp_lock_t * writelock;
+omp_lock_t * changeLock;
 
-char *** bitMapTls; // Two Bit maps
-                    // Each bits representing a tile to compute
+#define curTable switcher
+#define nextTable !switcher
+
+char * bitMapTls; // Two Bit maps represented in a vector
+                  // Each bits representing a tile to compute
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
 {
@@ -104,8 +108,10 @@ static int compute_new_state (int y, int x)
 
 unsigned life_compute_seq (unsigned nb_iter)
 {
-  for (unsigned it = 1; it <= nb_iter; it++) {
-    int change = 0;
+  int change = 0;
+  unsigned it = 1;
+  for (; it <= nb_iter; it++) {
+    
 
     monitoring_start_tile (0);
 
@@ -120,8 +126,7 @@ unsigned life_compute_seq (unsigned nb_iter)
     if (!change)
       return it;
   }
-
-  return 0;
+  return 0 ;
 }
 
 
@@ -175,22 +180,21 @@ unsigned life_compute_tiled (unsigned nb_iter)
 }
 
 //////////////////////////////// Tiled omp version
-unsigned life_compute_omp_tiled (unsigned nb_iter)
+// ./run -k random -s 1024 -ts 128 -i 100 -n -v omp
+unsigned life_compute_omp (unsigned nb_iter)
 {
 
   unsigned res = 0;
 
   for (unsigned it = 1; it <= nb_iter; it++) {
     unsigned change = 0;
-    #pragma omp parallel
-    #pragma omp single
+    #pragma omp parallel for collapse(2) schedule (static)
     for (int y = 0; y < DIM; y += TILE_H)
       for (int x = 0; x < DIM; x += TILE_W)
-        #pragma omp task
         change |= do_tile (x, y, TILE_W, TILE_H, omp_get_thread_num());
 
     swap_tables ();
-
+    
     if (!change) { // we stop when all cells are stable
       res = it;
       break;
@@ -282,6 +286,7 @@ static int lazy_do_tile (int x, int y, int width, int height, int who)
   return r;
 }
 
+
 //////////////////////// first lazy version
 unsigned life_compute_lazy(unsigned nb_iter)
 {
@@ -292,7 +297,7 @@ unsigned life_compute_lazy(unsigned nb_iter)
     tasks = initStacks(writelock,curr_tasks);
     init=false;
   }
-
+  
   //Main loop
   for (unsigned it = 1; it <= nb_iter; it++) {
     curr_tasks = switcher;
@@ -305,53 +310,403 @@ unsigned life_compute_lazy(unsigned nb_iter)
     for (unsigned taskNum = 0; taskNum < nbTsk; taskNum++){
       int x = tasks[curr_tasks].tasks[taskNum].tile_x ;
       int y = tasks[curr_tasks].tasks[taskNum].tile_y ;
-
+      
       #pragma omp task
        {
-        bool tileChange = lazy_do_tile (x, y, TILE_W, TILE_H, omp_get_thread_num());
-        change |= tileChange;
+        unsigned tileChange = 0;
+        // do_tile compute the inner pixels of the tile, not bothering
+        // if we should compute bordering tiles in the next itteration
+        //
+        // lazy_do_tile is used for the outer pixels of the tile, adding for the next
+        // itteration the borduring tile if the current pixel has changed state
+        tileChange |= do_tile (x+1, y+1, TILE_W-2, TILE_H-2, omp_get_thread_num());//inner tile
+        tileChange |= lazy_do_tile(x,y,TILE_W,1,omp_get_thread_num());//top
+        tileChange |= lazy_do_tile(x,y+TILE_H-1,TILE_W,1,omp_get_thread_num());//bot
+        tileChange |= lazy_do_tile(x,y+1,1,TILE_H-2,omp_get_thread_num());//left
+        tileChange |= lazy_do_tile(x+TILE_W-1,y+1,1,TILE_H-2,omp_get_thread_num());//right
         
         if(tileChange){       //if the tile change, we'll compute it again in the
           addCreateTask(x,y); //next itteration
         }
+        change |= tileChange;
       }
-      #pragma omp taskwait
     }
 
     delStack(tasks+curr_tasks);   
     swap_tables ();
 
-    if (tasks[next_tasks].nbTasks == 0) { // we stop when all cells are stable
+    if (!change) { // we stop when all cells are stable
       res = it;
       printf("there's no future tasks\n");
       break;
     }
     switcher = ! switcher;
   }
-  
   return res;
 }
 
-//////////////////////// BitMap lazy Version ; (UNFINISHED auxillairy functions todo)
+static int btmp_compute_new_state (int y, int x)
+{
+  unsigned n      = 0;
+  unsigned me     = cur_table (y, x) != 0;
+  unsigned change = 0;
+
+  if (x > 0 && x < DIM - 1 && y > 0 && y < DIM - 1) {
+
+    for (int i = y - 1; i <= y + 1; i++)
+      for (int j = x - 1; j <= x + 1; j++)
+        n += cur_table (i, j);
+
+    n = (n == 3 + me) | (n == 3);
+    if (n != me)
+      change |= 1;
+
+    next_table (y, x) = n;
+    
+    //preloading potential load for all cells on the border of the tiles
+    if(change == 1){
+      bool left = isOnLeft(x,y);
+      bool right = isOnRight(x,y);
+      bool top = isOnTop(x,y);
+      bool bottom = isOnBottom(x,y);
+
+      if(left){
+        addTaskBtmp((x-TILE_W)/TILE_W,(y/TILE_H),bitMapTls+nextTable*NB_TILES_TOT);    
+        if(top)
+          addTaskBtmp((x-TILE_W)/TILE_W,(y-TILE_H)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT);
+        else if(bottom)
+          addTaskBtmp((x-TILE_W)/TILE_W,(y+1)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT);
+      }
+      else if (right){
+        addTaskBtmp((x+1)/TILE_W,(y/TILE_H),bitMapTls+nextTable*NB_TILES_TOT);  
+        if(top)
+          addTaskBtmp((x+1)/TILE_W,(y-TILE_H)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT);
+        else if(bottom)
+          addTaskBtmp((x+1)/TILE_W,(y+1)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT);   
+      }
+      if(top){
+        addTaskBtmp((x/TILE_W),(y-TILE_H)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT);   
+      }
+      else if (bottom){
+        addTaskBtmp((x/TILE_W),(y+1)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT);
+      }
+    }
+  }
+
+  return change;
+}
+
+static int btmp_do_tile_reg (int x, int y, int width, int height)
+{
+  int change = 0;
+
+  for (int i = y; i < y + height; i++){
+    for (int j = x; j < x + width; j++){
+      change |= btmp_compute_new_state (i, j);     
+    }
+  }
+  return change;
+}
+
+static int btmp_do_tile (int x, int y, int width, int height, int who)
+{
+  int r;
+
+  monitoring_start_tile (who);
+
+  r = btmp_do_tile_reg (x, y, width, height);
+
+  monitoring_end_tile (x, y, width, height, who);
+
+  return r;
+}
+
+//////////////////////// BitMap lazy Version ;
+// ./run -k life -s 128 -ts 32 -v lazybtmp -m
+// ./run -k life -a random -s 2048 -ts 32 -v lazybtmp -m
+// ./run -k life -a otca_off -s 2196 -ts 32 -v lazybtmp -m
 unsigned life_compute_lazybtmp (unsigned nb_iter){
   
   unsigned change = 0;
-    
-  if(init){ // init section of the data structures 
-    writelock = (omp_lock_t *) malloc(sizeof(omp_lock_t));
-    bitMapTls = initBtmptls(writelock,bitMapTls);
+  unsigned res=0;
+
+  // init section of the data structures 
+  if(init){ 
+    changeLock = (omp_lock_t *) malloc(sizeof(omp_lock_t));
+    bitMapTls = initBtmptls(changeLock,curTable);
     init=false;
   }
+  //main loop
+  for(unsigned it=1; it<=nb_iter;it++){
+    //printBitmaps(bitMapTls,curTable);
+    #pragma omp parallel for collapse(2) schedule(dynamic)
+    for(int j = 0; j< NB_TILES_Y;j++){
+      for(int i = 0; i< NB_TILES_X;i++){
+        if(*(bitMapTls+curTable*NB_TILES_TOT+(j*NB_TILES_X)+i)==1){
+            unsigned x=i * TILE_W;
+            unsigned y=j * TILE_H;
+            unsigned tileChange = 0;
 
-  //MainLoop TODO
+            // do_tile compute the inner pixels of the tile, not bothering
+            // if we should compute bordering tiles in the next itteration
+            //
+            // btmp_do_tile is used for the outer pixels of the tile, adding for the next
+            // itteration the borduring tile if the current pixel has changed state
+            
+            tileChange |= do_tile (x +1, y +1, TILE_W-2, TILE_H-2, omp_get_thread_num());//inner tile
+            tileChange |= btmp_do_tile(x,y,TILE_W,1,omp_get_thread_num());//top
+            tileChange |= btmp_do_tile(x,y+TILE_H-1,TILE_W,1,omp_get_thread_num());//bot
+            tileChange |= btmp_do_tile(x,y+1,1,TILE_H-2,omp_get_thread_num());//left
+            tileChange |= btmp_do_tile(x+TILE_W-1,y+1,1,TILE_H-2,omp_get_thread_num());//right
+            
+            //If the tile changed, we'll want to compute it in the next itter
+            if(tileChange){
+              addTaskBtmp(i,j,bitMapTls+nextTable*NB_TILES_TOT);
+            }
+            change |= tileChange;
+          
+        }
+      }
+    }
+    //printBitmaps(bitMapTls,curTable);
+    deleteBtmp(bitMapTls+curTable*NB_TILES_TOT);
+    switcher = !switcher;
+    swap_tables ();
 
-  swap_tables ();
+    if (!change) { // we stop when all cells are stable
+      res = it;
+      printf("there's no future tasks\n");
+      //break;
+    }
+  }
+return res;
+}
 
-  if (!change) { // we stop when all cells are stable
-    //
+#define right 1
+#define left 2
+#define top 4
+#define topright 5
+#define topleft 6
+#define toprightleft 7
+#define bot 8
+#define botright 9
+#define botleft 10
+#define botrightleft 11
+#define righttopbot 13
+#define lefttopbot 14
+#define rightlefttopbot 15
+
+// rightleft and topbot are forbidden
+
+static int btmp2_compute_new_state (int y, int x,unsigned tilepos)
+{
+  unsigned n      = 0;
+  unsigned me     = cur_table (y, x) != 0;
+  unsigned change = 0;
+
+  if (x > 0 && x < DIM - 1 && y > 0 && y < DIM - 1) {
+    for (int i = y - 1; i <= y + 1; i++)
+      for (int j = x - 1; j <= x + 1; j++)
+    // for (int i = y - 1*((tilepos&bot)==bot); i <= y + 1*((tilepos&top)==top); i++)
+    //   for (int j = x - 1*((tilepos&left)==left); j <= x + 1*((tilepos&right)==right); j++)
+        n += cur_table (i, j);
+
+    n = (n == 3 + me) | (n == 3);
+    if (n != me)
+      change |= 1;
+
+    next_table (y, x) = n;
+    
+    //preloading potential load for all cells on the border of the tiles
+    if(change == 1){
+      unsigned mask = 0;
+      mask |= isOnRight(x,y) ? 1 : 0 ;
+      mask |= isOnLeft(x,y) ? 2 : 0 ;
+      mask |= isOnTop(x,y) ? 4 : 0 ;
+      mask |= isOnBottom(x,y) ? 8 : 0;
+      switch (mask)
+      {
+        case right: addTaskBtmp((x+1)/TILE_W,(y/TILE_H),bitMapTls+nextTable*NB_TILES_TOT); break;
+        case left: addTaskBtmp((x-TILE_W)/TILE_W,(y/TILE_H),bitMapTls+nextTable*NB_TILES_TOT); break; 
+        case top: addTaskBtmp((x/TILE_W),(y-TILE_H)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT); break; 
+        case bot: addTaskBtmp((x/TILE_W),(y+1)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT); break; 
+        case topright: addTaskBtmp((x+1)/TILE_W,(y-TILE_H)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT) ;break; 
+        case topleft: addTaskBtmp((x-TILE_W)/TILE_W,(y-TILE_H)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT); break;
+        case botright: addTaskBtmp((x+1)/TILE_W,(y+1)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT); break;
+        case botleft: addTaskBtmp((x-TILE_W)/TILE_W,(y+1)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT); break;
+        default:
+          break;
+      }
+    }
   }
 
-return 1;
+  return change;
+}
+
+static int btmp2_do_tile_reg (int x, int y, int width, int height,unsigned tilepos)
+{
+  int change = 0;
+
+  for (int i = y; i < y + height; i++){
+    for (int j = x; j < x + width; j++){
+      change |= btmp2_compute_new_state (i, j,tilepos);     
+    }
+  }
+  return change;
+}
+
+static int btmp2_do_tile (int x, int y, int width, int height, int who,unsigned tilePos)
+{
+  int r;
+
+  monitoring_start_tile (who);
+
+  r = btmp2_do_tile_reg (x, y, width, height,tilePos);
+
+  monitoring_end_tile (x, y, width, height, who);
+
+  return r;
+}
+
+static int compute_new_state_nocheck (int y, int x)
+{
+  unsigned n      = 0;
+  unsigned me     = cur_table (y, x) != 0;
+  unsigned change = 0;
+
+  for (int i = y - 1; i <= y + 1; i++)
+    for (int j = x - 1; j <= x + 1; j++)
+      n += cur_table (i, j);
+
+  n = (n == 3 + me) | (n == 3);
+  if (n != me)
+    change |= 1;
+
+  next_table (y, x) = n;
+  
+
+  return change;
+}
+
+static int do_tile_reg_nocheck (int x, int y, int width, int height)
+{
+  int change = 0;
+
+  for (int i = y; i < y + height; i++)
+    for (int j = x; j < x + width; j++)
+      change |= compute_new_state_nocheck (i, j);
+
+  return change;
+}
+
+static int do_tile_nocheck (int x, int y, int width, int height, int who)
+{
+  int r;
+
+  monitoring_start_tile (who);
+
+  r = do_tile_reg_nocheck (x, y, width, height);
+
+  monitoring_end_tile (x, y, width, height, who);
+
+  return r;
+}
+
+
+bool do_tileLauncher(unsigned tilePos,unsigned x,unsigned y){
+  bool tileChange = False;
+  if(true){// zero, inner tile 
+    //changed the default order for cache optimisation
+    tileChange |= btmp2_do_tile(x,y,TILE_W,1,omp_get_thread_num(),tilePos);//top
+    tileChange |= btmp2_do_tile(x,y+1,1,TILE_H-2,omp_get_thread_num(),tilePos);//left
+    tileChange |= do_tile_nocheck (x +1, y +1, TILE_W-2, TILE_H-2, omp_get_thread_num());//inner tile
+    tileChange |= btmp2_do_tile(x+TILE_W-1,y+1,1,TILE_H-2,omp_get_thread_num(),tilePos);//right
+    tileChange |= btmp2_do_tile(x,y+TILE_H-1,TILE_W,1,omp_get_thread_num(),tilePos);//bot
+  }
+  return tileChange;
+}
+
+//////////////////////// BitMap2 lazy Version ;
+// ./run -k life -s 128 -ts 32 -v lazybtmp2 -m
+// ./run -k life -a random -s 2048 -ts 32 -v lazybtmp2 -m
+// ./run -k life -a otca_off -s 2196 -ts 32 -v lazybtmp2 -m
+unsigned life_compute_lazybtmp2 (unsigned nb_iter){
+  unsigned change = 0;
+  unsigned res=0;
+  // init section of the data structures 
+  if(init){ 
+    changeLock = (omp_lock_t *) malloc(sizeof(omp_lock_t));
+    bitMapTls = initBtmptls(changeLock,curTable);
+    init=false;
+  }
+  //main loop
+  for(unsigned it=1; it<=nb_iter;it++){
+    //printBitmaps(bitMapTls,curTable);
+    #pragma omp parallel for  schedule(static)
+    for(int i = 0; i< NB_TILES_X;i++){
+      for(int j = 0; j< NB_TILES_Y;j++){
+        if(*(bitMapTls+curTable*NB_TILES_TOT+(j*NB_TILES_X)+i)==1){
+            unsigned x=i * TILE_W;
+            unsigned y=j * TILE_H;
+            unsigned tilePos = tilePosition(i,j);
+            unsigned tileChange = do_tileLauncher(tilePos,x,y);      
+            if(tileChange){
+              addTaskBtmp(i,j,bitMapTls+nextTable*NB_TILES_TOT);
+            }
+            change |= tileChange;    
+        }
+      }
+    }
+    //printBitmaps(bitMapTls,curTable);
+    deleteBtmp(bitMapTls+curTable*NB_TILES_TOT);
+    switcher = !switcher;
+    swap_tables ();
+    if (!change) { // we stop when all cells are stable
+      res = it;
+      printf("there's no future tasks\n");
+      //break;
+    }
+  }
+return res;
+}
+unsigned life_compute_lazybtmp2ji (unsigned nb_iter){
+  unsigned change = 0;
+  unsigned res=0;
+  // init section of the data structures 
+  if(init){ 
+    changeLock = (omp_lock_t *) malloc(sizeof(omp_lock_t));
+    bitMapTls = initBtmptls(changeLock,curTable);
+    init=false;
+  }
+  //main loop
+  for(unsigned it=1; it<=nb_iter;it++){
+    //printBitmaps(bitMapTls,curTable);
+    #pragma omp parallel for collapse(2) schedule(runtime)
+    for(int j = 0; j< NB_TILES_Y;j++){
+      for(int i = 0; i< NB_TILES_X;i++){
+        if(*(bitMapTls+curTable*NB_TILES_TOT+(j*NB_TILES_X)+i)==1){
+            unsigned x=i * TILE_W;
+            unsigned y=j * TILE_H;
+            unsigned tilePos = tilePosition(i,j);
+            unsigned tileChange = do_tileLauncher(tilePos,x,y);      
+            if(tileChange){
+              addTaskBtmp(i,j,bitMapTls+nextTable*NB_TILES_TOT);
+            }
+            change |= tileChange;    
+        }
+      }
+    }
+    //printBitmaps(bitMapTls,curTable);
+    deleteBtmp(bitMapTls+curTable*NB_TILES_TOT);
+    switcher = !switcher;
+    swap_tables ();
+    if (!change) { // we stop when all cells are stable
+      res = it;
+      printf("there's no future tasks\n");
+      //break;
+    }
+  }
+return res;
 }
 ///////////////////////////// Initial configs
 

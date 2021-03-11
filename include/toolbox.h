@@ -1,5 +1,10 @@
+#include "easypap.h"
+
 #include <omp.h>
 #include <stdbool.h>
+
+#define NB_TILES_TOT (NB_TILES_X*NB_TILES_Y)
+
 
 struct task_t{
   int tile_x;
@@ -11,6 +16,7 @@ struct taskStack_t{
   int stackSize;
   int nbTasks;
 };typedef struct taskStack_t taskStack;
+
 
 /**
  * @brief Create a Task object
@@ -86,6 +92,22 @@ bool isOnTop(int x,int y);
 bool isOnBottom(int x,int y);
 
 /**
+ * @brief Same as above but with tiles
+ * 
+ * @param i 
+ * @param j 
+ * @return true 
+ * @return false 
+ */
+bool isTileOnLeft(int i,int j);
+
+bool isTileOnRight(int i,int j);
+
+bool isTileOnTop(int i,int j);
+
+bool isTileOnBottom(int i,int j);
+
+/**
  * @brief Initializes the stack of tasks data structure that the lazy
  * compute algorithm will use
  *                    
@@ -132,6 +154,56 @@ taskStack * initStacks( omp_lock_t * lock, int curr_tasks);
  * 
  * @param lock 
  * @param curr_tasks 
- * @return char*** 
+ * @return char* 
  */
-char *** initBtmptls(omp_lock_t * lock,int curr_tasks);
+char * initBtmptls(omp_lock_t * lock,int curr_tasks);
+
+
+/**
+ * @brief adds a task to the bitmap
+ * concretly it changes a bit at a given position x y
+ * in the given bitmap to 1
+ * 
+ * example with x = 2 and y = 2:   
+ *                                              after addTaskBtmp(next_map,2,2,map);
+ *              0 0 1 0       0 0 1 0             0 0 1 0
+ *              1 0 0 0       1 0 0 1         ==> 1 0 0 1
+ *              1 0 0 0       0 1 0 0             0 1 1 0
+ *            map[current]    map[next_map]      map[next_map]
+ * 
+ * @param next_map 
+ * @param x 
+ * @param y 
+ * @param map 
+ */
+unsigned addTaskBtmp(int i, int j,char * map);
+
+/**
+ * @brief For debugging purpose mainly
+ * prints the current state of boths bitmaps
+ * 
+ * @param btmp 
+ */
+void printBitmaps(char * btmp,bool current);
+
+/**
+ * @brief deletes the content (the tasks) of a given bitmap
+ * Concretly it sets all bits of the bitmap to 0
+ * 
+ * It is used at the end of each itteration on the current bitmap representing
+ * the task that have been done.
+ * This new empty bitmap is now set to recieve all the future tasks of the next itteration
+ * since we alternate the roles of the two bitmaps we use.
+ * @param btmp 
+ */
+void deleteBtmp(char * btmp);
+
+/**
+ * @brief gives the global location of the tile in a coded byte
+ * if its on the left border, if its top right...
+ * 
+ * @param i 
+ * @param j 
+ * @return unsigned 
+ */
+unsigned tilePosition(int i, int j);
