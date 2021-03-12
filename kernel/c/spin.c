@@ -6,6 +6,7 @@
 
 static void rotate (void);
 static unsigned compute_color (int i, int j);
+//#define VEC_SIZE 32
 
 // If defined, the initialization hook function is called quite early in the
 // initialization process, after the size (DIM variable) of images is known.
@@ -76,22 +77,7 @@ static void do_tile_vec (int x, int y, int width, int height);
 
 #endif
 
-///////////////////////////// Vectorized sequential version (vec)
-// Suggested cmdline(s):
-// ./run -k spin -v vec
-//
-unsigned spin_compute_vec (unsigned nb_iter)
-{
 
-  for (unsigned it = 1; it <= nb_iter; it++) {
-
-    do_tile_vec (0, 0, DIM, DIM);
-
-    rotate ();
-  }
-
-  return 0;
-}
 ///////////////////////////////////////////////////////////////////////////
 
 static void do_tile (int x, int y, int width, int height, int who)
@@ -157,6 +143,23 @@ unsigned spin_compute_omp(unsigned nb_iter)
     for (int y = 0; y < DIM; y += TILE_H)
       for (int x = 0; x < DIM; x += TILE_W)
         do_tile (x, y, TILE_W, TILE_H, omp_get_thread_num());
+    rotate ();
+  }
+
+  return 0;
+}
+
+///////////////////////////// Vectorized sequential version (vec)
+// Suggested cmdline(s):
+// ./run -k spin -v vec
+//
+unsigned spin_compute_vec (unsigned nb_iter)
+{
+
+  for (unsigned it = 1; it <= nb_iter; it++) {
+
+    do_tile_vec (0, 0, DIM, DIM);
+
     rotate ();
   }
 
@@ -233,11 +236,14 @@ static inline __m256 _mm256_abs_ps (__m256 a)
 static __m256 _mm256_atan_ps (__m256 x)
 {
   __m256 res;
-  
+  __m256 pidiv4 = _mm256_set1_ps (M_PI / 4);
+  __m256 k = _mm256_set1_ps(0.273);
+  __m256 one = _mm256_set1_ps(1);
+  __m256 t = _mm256_sub_ps(one,_mm256_abs_ps(x));
   // FIXME: we go back to sequential mode here :(
-  for (int i = 0; i < VEC_SIZE; i++)
-    res[i] = x[i] * M_PI / 4 + 0.273 * x[i] * (1 - fabsf(x[i]));
-
+  //for (int i = 0; i < VEC_SIZE_FLOAT; i++)
+    //res[i] = x[i] * M_PI / 4 + 0.273 * x[i] * (1 - fabsf(x[i]));
+  res =  _mm256_add_ps(_mm256_mul_ps(x, pidiv4) , _mm256_mul_ps( _mm256_mul_ps(k, x) , t));
   return res;
   
   //  return x * M_PI / 4 + 0.273 * x * (1 - abs(x));
@@ -255,7 +261,9 @@ static inline __m256 _mm256_negmask_ps (__m256 a, __m256 mask)
 
 static __m256 _mm256_atan2_ps (__m256 y, __m256 x)
 {
-  //__m256 pi2 = _mm256_set1_ps (M_PI_2);
+  // __m256 pi2 = _mm256_set1_ps (M_PI_2);
+  // __m256 pi = _mm256_set1_ps (M_PI);
+  // __m256 minusone = _mm256_set1_ps (-1);
 
   // float ay = fabsf (y), ax = fabsf (x);
   __m256 ax = _mm256_abs_ps (x);
@@ -273,14 +281,32 @@ static __m256 _mm256_atan2_ps (__m256 y, __m256 x)
   __m256 th = _mm256_atan_ps (z);
 
   // FIXME: we go back to sequential mode here :(
-  for (int i = 0; i < VEC_SIZE; i++) {
+  
+#if 0
+  for (int i = 0; i < VEC_SIZE_FLOAT; i++) {
     if (mask[i])
-      th[i] = M_PI_2 - th[i];
+     th[i] = M_PI_2 - th[i];
+
     if (x[i] < 0)
       th[i] = M_PI - th[i];
+
     if (y[i] < 0)
       th[i] = -th[i];
+
   }
+  #else
+
+    th = _mm256_negmask_ps(th,mask);
+    th = _mm256_add_ps(th,_mm256_and_ps(mask,_mm256_set1_ps(M_PI_2)));
+
+    mask = _mm256_cmp_ps (x, _mm256_setzero_ps(), _CMP_LT_OS);
+    th = _mm256_negmask_ps(th,mask);
+    th = _mm256_add_ps(th,_mm256_and_ps(mask,_mm256_set1_ps(M_PI)));
+
+    mask = _mm256_cmp_ps (y, _mm256_setzero_ps(), _CMP_LT_OS);
+    th = _mm256_negmask_ps(th,mask);
+
+  #endif
 
   return th;
 }
@@ -312,7 +338,7 @@ static void do_tile_vec (int x, int y, int width, int height)
   __m256 ang    = _mm256_set1_ps (base_angle + M_PI);
 
   for (int i = y; i < y + height; i++)
-    for (int j = x; j < x + width; j += VEC_SIZE) {
+    for (int j = x; j < x + width; j += VEC_SIZE_FLOAT) {
 
       __m256 vi = _mm256_set1_ps (i);
       __m256 vj = _mm256_add_ps (_mm256_set1_ps (j),
