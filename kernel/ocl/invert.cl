@@ -9,7 +9,7 @@ __kernel void invert_ocl (__global unsigned *in, __global unsigned *out)
 
   couleur = in [y * DIM + x];
 
-  couleur ^= 0xFFFFFFFF;
+  couleur ^= 0xFFFFFF00;
 
   out [y * DIM + x] = couleur;
 }

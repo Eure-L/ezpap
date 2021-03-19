@@ -143,7 +143,7 @@ unsigned mandel_compute_ompvec (unsigned nb_iter)
 {
   
   for (unsigned it = 1; it <= nb_iter; it++) {
-    #pragma omp parallel for collapse(2) schedule(dynamic)
+    #pragma omp parallel for collapse(2) schedule(runtime)
     for(int j =0;j<DIM;j+=TILE_H)
       for(int i=0;i<DIM;i+=TILE_W)
         do_tile_vec (i, j, TILE_W, TILE_H, omp_get_thread_num());
