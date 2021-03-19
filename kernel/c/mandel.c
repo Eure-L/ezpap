@@ -263,7 +263,7 @@ static void compute_multiple_pixels (int i, int j)
 
   __m256i iter = _mm256_setzero_si256 ();
   __m256i un   = _mm256_set1_epi32 (1);
-  __m256i vrai = _mm256_set1_epi32 (-1);
+  //__m256i vrai = _mm256_set1_epi32 (-1);
 
   zr = zi = norm = _mm256_set1_ps (0);
 
@@ -323,7 +323,7 @@ static void compute_multiple_pixels (int i, int j)
 
 static void do_tile_vec (int x, int y, int width, int height,int who)
 {
-   monitoring_start_tile (who);
+   //monitoring_start_tile (who);
   for (int i = y; i < y + height; i++)
     for (int j = x; j < x + width; j += VEC_SIZE_FLOAT)
       compute_multiple_pixels (i, j);
@@ -331,7 +331,7 @@ static void do_tile_vec (int x, int y, int width, int height,int who)
        
 
 
-    monitoring_end_tile (x, y, width, height, who);
+    //monitoring_end_tile (x, y, width, height, who);
 }
 
 #endif
