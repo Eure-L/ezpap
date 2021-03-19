@@ -507,8 +507,6 @@ static int btmp2_compute_new_state (int y, int x,unsigned tilepos)
   if (x > 0 && x < DIM - 1 && y > 0 && y < DIM - 1) {
     for (int i = y - 1; i <= y + 1; i++)
       for (int j = x - 1; j <= x + 1; j++)
-    // for (int i = y - 1*((tilepos&bot)==bot); i <= y + 1*((tilepos&top)==top); i++)
-    //   for (int j = x - 1*((tilepos&left)==left); j <= x + 1*((tilepos&right)==right); j++)
         n += cur_table (i, j);
 
     n = (n == 3 + me) | (n == 3);
@@ -615,14 +613,12 @@ static int do_tile_nocheck (int x, int y, int width, int height, int who)
 
 bool do_tileLauncher(unsigned tilePos,unsigned x,unsigned y){
   bool tileChange = False;
-  if(true){// zero, inner tile 
-    //changed the default order for cache optimisation
-    tileChange |= btmp2_do_tile(x,y,TILE_W,1,omp_get_thread_num(),tilePos);//top
-    tileChange |= btmp2_do_tile(x,y+1,1,TILE_H-2,omp_get_thread_num(),tilePos);//left
-    tileChange |= do_tile_nocheck (x +1, y +1, TILE_W-2, TILE_H-2, omp_get_thread_num());//inner tile
-    tileChange |= btmp2_do_tile(x+TILE_W-1,y+1,1,TILE_H-2,omp_get_thread_num(),tilePos);//right
-    tileChange |= btmp2_do_tile(x,y+TILE_H-1,TILE_W,1,omp_get_thread_num(),tilePos);//bot
-  }
+  tileChange |= btmp2_do_tile(x,y,TILE_W,1,omp_get_thread_num(),tilePos);//top
+  tileChange |= btmp2_do_tile(x,y+1,1,TILE_H-2,omp_get_thread_num(),tilePos);//left
+  tileChange |= do_tile_nocheck (x +1, y +1, TILE_W-2, TILE_H-2, omp_get_thread_num());//inner tile
+  tileChange |= btmp2_do_tile(x+TILE_W-1,y+1,1,TILE_H-2,omp_get_thread_num(),tilePos);//right
+  tileChange |= btmp2_do_tile(x,y+TILE_H-1,TILE_W,1,omp_get_thread_num(),tilePos);//bot
+  
   return tileChange;
 }
 
@@ -669,7 +665,8 @@ unsigned life_compute_lazybtmp2 (unsigned nb_iter){
   }
 return res;
 }
-unsigned life_compute_lazybtmp2ji (unsigned nb_iter){
+
+unsigned life_compute_vec (unsigned nb_iter){
   unsigned change = 0;
   unsigned res=0;
   // init section of the data structures 
@@ -681,9 +678,9 @@ unsigned life_compute_lazybtmp2ji (unsigned nb_iter){
   //main loop
   for(unsigned it=1; it<=nb_iter;it++){
     //printBitmaps(bitMapTls,curTable);
-    #pragma omp parallel for collapse(2) schedule(runtime)
-    for(int j = 0; j< NB_TILES_Y;j++){
-      for(int i = 0; i< NB_TILES_X;i++){
+    #pragma omp parallel for collapse(2) schedule(dynamic)
+    for(int i = 0; i< NB_TILES_X;i++){
+      for(int j = 0; j< NB_TILES_Y;j++){
         if(*(bitMapTls+curTable*NB_TILES_TOT+(j*NB_TILES_X)+i)==1){
             unsigned x=i * TILE_W;
             unsigned y=j * TILE_H;

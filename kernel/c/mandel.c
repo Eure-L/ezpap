@@ -273,11 +273,13 @@ static void compute_multiple_pixels (int i, int j)
     // divergé pour tout le monde)
 
     // FIXME 1
-    if( _mm_testc_ps(mask, _mm256_set1_ps(0)))
+    if( _mm256_testz_si256(_mm256_xor_si256(mask,_mm256_setzero_si256()), _mm256_set1_epi32(1))){
+      //printf("%d\n",mask);
       break;
-
+    }
     // On met à jour le nombre d'itérations effectuées pour chaque pixel.
 
+    
     // FIXME 2
     iter = _mm256_add_epi32 (iter, un);
 
