@@ -59,7 +59,7 @@ static void do_tile_reg (int x, int y, int width, int height)
 // Copy this first part and insert into mandel.c, before the do_tile function
 #if defined(ENABLE_VECTO) && (AVX2 == 1)
 
-static void do_tile_vec (int x, int y, int width, int height);
+static void do_tile_vec (int x, int y, int width, int height, int who);
 
 #else
 
@@ -67,7 +67,7 @@ static void do_tile_vec (int x, int y, int width, int height);
 #warning Only 256bit AVX (VEC_SIZE_FLOAT=8) vectorization is currently supported
 #endif
 
-#define do_tile_vec(x, y, w, h) do_tile_reg ((x), (y), (w), (h))
+#define do_tile_vec(x, y, w, h, who) do_tile ((x), (y), (w), (h), (who))
 
 #endif
 
@@ -124,16 +124,36 @@ unsigned mandel_compute_tiled_omp (unsigned nb_iter)
 //
 unsigned mandel_compute_vec (unsigned nb_iter)
 {
-
+  
   for (unsigned it = 1; it <= nb_iter; it++) {
 
-    do_tile_vec (0, 0, DIM, DIM);
+    do_tile_vec (0, 0, DIM, DIM, omp_get_thread_num());
 
     zoom ();
   }
 
   return 0;
 }
+
+///////////////////////////// Vectorized sequential version (vec)
+// Suggested cmdline(s):
+// ./run -k mandel -v vec
+//
+unsigned mandel_compute_ompvec (unsigned nb_iter)
+{
+  
+  for (unsigned it = 1; it <= nb_iter; it++) {
+    #pragma omp parallel for collapse(2) schedule(dynamic)
+    for(int j =0;j<DIM;j+=TILE_H)
+      for(int i=0;i<DIM;i+=TILE_W)
+        do_tile_vec (i, j, TILE_W, TILE_H, omp_get_thread_num());
+
+    zoom ();
+  }
+
+  return 0;
+}
+
 ///////////////////////////////////////////////////////////////////////////
 
 
@@ -281,7 +301,8 @@ static void compute_multiple_pixels (int i, int j)
 
     
     // FIXME 2
-    iter = _mm256_add_epi32 (iter, un);
+
+    iter = _mm256_add_epi32 (iter, _mm256_and_si256(mask,un));
 
     // On calcule Z = Z^2 + C et c'est reparti !
     __m256 x = _mm256_add_ps (rc, _mm256_fnmadd_ps (zi, zi, cr));
@@ -300,11 +321,17 @@ static void compute_multiple_pixels (int i, int j)
   cur_img (i, j + 7) = iteration_to_color (_mm256_extract_epi32 (iter, 7));
 }
 
-static void do_tile_vec (int x, int y, int width, int height)
+static void do_tile_vec (int x, int y, int width, int height,int who)
 {
+   monitoring_start_tile (who);
   for (int i = y; i < y + height; i++)
     for (int j = x; j < x + width; j += VEC_SIZE_FLOAT)
       compute_multiple_pixels (i, j);
+
+       
+
+
+    monitoring_end_tile (x, y, width, height, who);
 }
 
 #endif
