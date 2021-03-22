@@ -33,7 +33,7 @@ __m256i zero;
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
 {
   //added empty border for optimized structure for AVX usage
-  return i + (y+1) * (DIM+2) + (x+1);
+  return i + (y+1) * (DIM+VEC_SIZE_CHAR*2) + (x + VEC_SIZE_CHAR);
 }
 
 static inline char *table_map (char * i, int x, int y)
@@ -189,8 +189,7 @@ void life_init (void)
   // life_init may be (indirectly) called several times so we check if data were
   // already allocated
   if (_table == NULL) {
-    const unsigned size = (DIM+2) * (DIM+2) * sizeof (cell_t);
-
+    const unsigned size = (DIM+VEC_SIZE_CHAR*2) * (DIM+VEC_SIZE_CHAR*2) * sizeof (cell_t);
     PRINT_DEBUG ('u', "Memory footprint = 2 x %d bytes\n", size);
 
     _table = mmap (NULL, size, PROT_READ | PROT_WRITE,
@@ -207,7 +206,7 @@ void life_init (void)
 void life_finalize (void)
 {
   // printf("finalize\n");
-  const unsigned size = (DIM+2) * (DIM+2) * sizeof (cell_t);
+  const unsigned size = (DIM+VEC_SIZE_CHAR*2) * (DIM+VEC_SIZE_CHAR*2)  * sizeof (cell_t);
 
   munmap (_table, size);
   munmap (_alternate_table, size);
@@ -561,9 +560,9 @@ static int do_tile_reg_vec (int x, int y, int width, int height)
     vecTabRight[midlane] = _mm256_loadu_si256((void*)(&cur_table(j,i+1)));
     vecTabRight[botlane] = _mm256_loadu_si256((void*)(&cur_table(j+1,i+1)));
 
-    vecTabMid[toplane] = _mm256_loadu_si256((void*)(&cur_table(j-1,i)));
-    vecTabMid[midlane] = _mm256_loadu_si256((void*)(&cur_table(j,i)));
-    vecTabMid[botlane] = _mm256_loadu_si256((void*)(&cur_table(j+1,i)));
+    vecTabMid[toplane] = _mm256_load_si256((void*)(&cur_table(j-1,i)));
+    vecTabMid[midlane] = _mm256_load_si256((void*)(&cur_table(j,i)));
+    vecTabMid[botlane] = _mm256_load_si256((void*)(&cur_table(j+1,i)));
     
     for ( j = y; j < y + height; j++){
       //printf("       %d / %d\n",j-y,height);
@@ -588,12 +587,12 @@ static int do_tile_reg_vec (int x, int y, int width, int height)
                               vecTabRight[toplane],\
                               vecTabRight[midlane]),\
                             vecTabRight[botlane]);
-      
+
       nVec =_mm256_add_epi8(MtotVec,\
               _mm256_add_epi8(LtotVec,RtotVec));
       
       // prntAVXi(nVec,"NVc");
-        
+
       __m256i neq3 = _mm256_and_si256(_mm256_cmpeq_epi8(nVec,_mm256_set1_epi8(3)),mask1);
       __m256i meP3 = _mm256_add_epi8(vecTabMid[midlane],_mm256_set1_epi8(3));
       __m256i neqMeP3 = _mm256_and_si256(_mm256_cmpeq_epi8(nVec,meP3),mask1);
@@ -618,7 +617,7 @@ static int do_tile_reg_vec (int x, int y, int width, int height)
       // Rolling the roles
       vecTabRight[toplane]=_mm256_loadu_si256((void*)(&cur_table(j+2,i+1)));
       vecTabLeft[toplane]=_mm256_loadu_si256((void*)(&cur_table(j+2,i-1)));
-      vecTabMid[toplane]=_mm256_loadu_si256((void*)(&cur_table(j+2,i)));
+      vecTabMid[toplane]=_mm256_load_si256((void*)(&cur_table(j+2,i)));
       cnt++;
       // printf("\n---rollout done\n");
       // printVecLanes(vecTabMid,toplane,midlane,botlane,"MIDDLE\n");
@@ -631,6 +630,7 @@ static int do_tile_reg_vec (int x, int y, int width, int height)
   }
   // if(tileChange)
   //   exit(0);
+
   return tileChange;
 }
 
@@ -688,7 +688,8 @@ unsigned life_compute_lazybtmpvec (unsigned nb_iter){
           *next_mapAddr(i,j)=tileChange;
           change |= tileChange;
           #else
-          *next_mapAddr(i,j)=do_tile_vec(x, y , TILE_W, TILE_H, who);
+            *next_mapAddr(i,j)=do_tile_vec(x, y , TILE_W, TILE_H, who);
+
           #endif    
         }
       } 
