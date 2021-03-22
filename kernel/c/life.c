@@ -647,6 +647,25 @@ static int do_tile_vec (int x, int y, int width, int height, int who)
   return r;
 }
 
+static bool hasAnyTileChanged(void){
+  bool change = false;
+  #pragma omp parallel for schedule (static) shared(change)
+  for(int j = 0 ; j < NB_TILES_Y; j++){
+    if(change){
+        continue;
+      }
+    for(int i = 0 ; i < NB_TILES_X; i++){
+      if(change){
+        continue;
+      }
+      if(cur_map(i,j))
+        change = true;
+    }
+  }
+  return change;
+}
+
+
 //////////////////////// BitMap2 lazy vectorial Version ;
 // ./run -k life -s 2048 -ts 64 -v lazybtmpvec -m
 // ./run -k life -a random -s 2048 -ts 32 -v lazybtmpvec -m
@@ -657,19 +676,27 @@ unsigned life_compute_lazybtmpvec (unsigned nb_iter){
 
   for(unsigned it=1; it<=nb_iter;it++){
     #pragma omp parallel for collapse(2) schedule(dynamic)
-    for(int i = 0; i< NB_TILES_X;i++){
-      for(int j = 0; j< NB_TILES_Y;j++){       
+    for(int j = 0; j< NB_TILES_Y;j++){ 
+      for(int i = 0; i< NB_TILES_X;i++){
         if(hasNeighbourChanged(i,j)){
           unsigned x=i * TILE_W;
           unsigned y=j * TILE_H;
-          unsigned tileChange = false;
           unsigned who = omp_get_thread_num();
+          #if 0
+          unsigned tileChange = false;
           tileChange = do_tile_vec(x, y , TILE_W, TILE_H, who);
           *next_mapAddr(i,j)=tileChange;
-          change |= tileChange;    
+          change |= tileChange;
+          #else
+          *next_mapAddr(i,j)=do_tile_vec(x, y , TILE_W, TILE_H, who);
+          #endif    
         }
       } 
     }
+    #if 0
+    #else
+    change = hasAnyTileChanged();
+    #endif
     deleteCurrentBtmp();
     swap_tables ();
     if (!change) { // we stop when all cells are stable
