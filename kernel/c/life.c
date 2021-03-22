@@ -10,6 +10,9 @@
 #include <unistd.h>
 
 #define NB_TILES_TOT (NB_TILES_X*NB_TILES_Y)
+#define NB_FAKE_X (NB_TILES_X + 2)
+#define NB_FAKE_Y (NB_TILES_Y + 2)
+#define NB_FAKE_TILES ((NB_FAKE_X)*(NB_FAKE_Y))
 
 
 
@@ -19,29 +22,23 @@ typedef char cell_t;
 
 static cell_t *restrict _table = NULL, *restrict _alternate_table = NULL;
 
-bool init = true;
 bool switcher = 1;
-unsigned curr_tasks = 1;
-unsigned next_tasks = 0;
-omp_lock_t * writelock;
-omp_lock_t * changeLock;
 
 #define curTable switcher
 #define nextTable !switcher
 
 char * bitMapTls; // Two Bit maps represented in a vector
                   // Each bits representing a tile to compute
-
-
+__m256i zero;
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
 {
-  return i + y * DIM + x;
-
+  //added empty border for optimized structure for AVX usage
+  return i + (y+1) * (DIM+2) + (x+1);
 }
 
-static inline char *table_map (char *restrict i, int y, int x)
+static inline char *table_map (char * i, int x, int y)
 {
-  return i + y * NB_TILES_X + x;
+  return i + (y+1) * NB_FAKE_X + (x+1);
 }
 
 
@@ -49,9 +46,12 @@ static inline char *table_map (char *restrict i, int y, int x)
 // Instead, we use 2D arrays of boolean values, not colors
 #define cur_table(y, x) (*table_cell (_table, (y), (x)))
 #define next_table(y, x) (*table_cell (_alternate_table, (y), (x)))
+#define next_tableAddr(y, x) (table_cell (_alternate_table, (y), (x)))
 
-#define cur_map(y, x) (*table_map ((bitMapTls+(curTable*NB_TILES_TOT)), (y), (x)))
-#define next_map(y, x) (*table_map ((bitMapTls+(nextTable*NB_TILES_TOT)), (y), (x)))
+#define cur_map(x, y) (*table_map ((bitMapTls+(curTable*NB_FAKE_TILES)), (x), (y)))
+#define cur_mapAddr(x, y) (table_map ((bitMapTls+(curTable*NB_FAKE_TILES)), (x), (y)))
+#define next_map(x, y) (*table_map ((bitMapTls+(nextTable*NB_FAKE_TILES)), (x), (y)))
+#define next_mapAddr(x, y) (table_map ((bitMapTls+(nextTable*NB_FAKE_TILES)), (x), (y)))
 
 #define right 1
 #define left 2
@@ -67,162 +67,34 @@ static inline char *table_map (char *restrict i, int y, int x)
 #define rightlefttopbot 15
 
 ////
-bool isOnLeft(int x,int y){
+static inline bool isOnLeft(int x,int y){
   return x > 0 && x%TILE_W == 0;
 }
-bool isOnRight(int x,int y){
+static inline bool isOnRight(int x,int y){
   return (x<DIM-1 && (x%TILE_W == TILE_W-1));
 }
-bool isOnTop(int x,int y){
+static inline bool isOnTop(int x,int y){
   return (y>0 && y%TILE_H==0);
 }
-bool isOnBottom(int x,int y){
+static inline bool isOnBottom(int x,int y){
   return (y<DIM-1 && (y%TILE_H == TILE_H-1));
 }
 //
-bool isTileOnLeft(int i,int j){
+static inline unsigned isTileOnLeft(int i,int j){
   return i == 0;
 }
-bool isTileOnRight(int i,int j){
+static inline unsigned isTileOnRight(int i,int j){
   return i == NB_TILES_X-1;
 }
-bool isTileOnTop(int i,int j){
+static inline unsigned isTileOnTop(int i,int j){
   return j == 0;
 }
-bool isTileOnBottom(int i,int j){
+static inline unsigned isTileOnBottom(int i,int j){
   return j == NB_TILES_Y-1;
 }
 ////
 
 
-char * initBtmptls(omp_lock_t * lock,int curr_tasks){
-  
-  char * map = (char *) malloc ((2 * NB_TILES_X * NB_TILES_Y) * sizeof(char));
-  omp_init_lock(lock);
-  if(map == NULL){
-    printf("map pointer NULL\n");
-    exit(EXIT_FAILURE);
-  }       
-
-  //int idMap;
-  for (int i=0;i<NB_TILES_TOT;i++){
-    *(map+i)=0;
-  }
-  for (int i=0;i<NB_TILES_TOT;i++){
-    *(map+NB_TILES_TOT+i)=1;
-  }
-    //printf("init a : %d \n",*(map+(NB_TILES_TOT)+i));
-  
-  return map;
-}
-
-char * initInnertls(void){
-  
-  char * map = (char *) malloc (( NB_TILES_X * NB_TILES_Y) * sizeof(char));
-  if(map == NULL){
-    printf("map pointer NULL\n");
-    exit(EXIT_FAILURE);
-  }    
-
-  for (int i=0;i<NB_TILES_TOT;i++){
-    *(map+i)=0;
-  }
-  
-  return map;
-}
-
-void addTaskBtmp( int i, int j,char * map){
-  //if(i>=0 && j>=0 && i<NB_TILES_X && j< NB_TILES_Y){
-     *(map+j*(NB_TILES_X)+i)=1;
-  //}
-  //return 0;
-}
-
-void printBitmaps(char * btmp,bool current){
-
-  printf("Current bitmap : \n");
-  for(int i = 0; i<NB_TILES_X; i++){
-    for(int j = 0; j<NB_TILES_Y; j++){
-      printf(" %d ", *(btmp+current*NB_TILES_TOT+j*(NB_TILES_X)+i));
-    }
-    printf("\n");
-  }
-  printf("\n Next bitmap : \n");
-  for(int i = 0; i<NB_TILES_X; i++){
-    for(int j = 0; j<NB_TILES_Y; j++){
-      printf(" %d ",*(btmp+(!current)*NB_TILES_TOT+j*(NB_TILES_X)+i));
-    }
-    printf("\n");
-  }
-}
-void printInnermap(char * btmp){
-
-  printf("Inner bitmap : \n");
-  for(int i = 0; i<NB_TILES_X; i++){
-    for(int j = 0; j<NB_TILES_Y; j++){
-      printf(" %d ", *(btmp+j*(NB_TILES_X)+i));
-    }
-    printf("\n");
-  }
-}
-
-void deleteBtmp(char * btmp){
-  for(int i = 0; i<NB_TILES_X; i++){
-    for(int j = 0;j<NB_TILES_Y; j++){
-      *(btmp+j*(NB_TILES_X)+i)=0;
-    }
-  }
-}
-
-unsigned tilePosition(int i, int j){
-  unsigned mask = 0;
-  mask |= top * isTileOnTop(i,j) | bot * isTileOnBottom(i,j) | \
-          left * isTileOnLeft(i,j) | right * isTileOnRight(i,j);
-  return mask;
-}
-
-
-void prntAVXi( __m256i vec,char * name){
-  int byteSize = sizeof(char);
-  const size_t n = sizeof(__m256i) / byteSize;
-  char buffer[n];
-  _mm256_storeu_si256((void*)buffer, vec);
-  int i = 0;
-  printf("-- %s -- \n",name);
-  for (; i < 32 ; i++){
-      //if(buffer[i]!=0)
-         
-      printf("%u.",buffer[i]);
-      
-  }
-  printf(" ~ i : %d\n",i);
-}
-
-
-void life_init (void)
-{
-  // life_init may be (indirectly) called several times so we check if data were
-  // already allocated
-  if (_table == NULL) {
-    const unsigned size = DIM * DIM * sizeof (cell_t);
-
-    PRINT_DEBUG ('u', "Memory footprint = 2 x %d bytes\n", size);
-
-    _table = mmap (NULL, size, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-
-    _alternate_table = mmap (NULL, size, PROT_READ | PROT_WRITE,
-                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  }
-}
-
-void life_finalize (void)
-{
-  const unsigned size = DIM * DIM * sizeof (cell_t);
-
-  munmap (_table, size);
-  munmap (_alternate_table, size);
-}
 
 // This function is called whenever the graphical window needs to be refreshed
 void life_refresh_img (void)
@@ -232,10 +104,122 @@ void life_refresh_img (void)
       cur_img (i, j) = cur_table (i, j) * color;
 }
 
+
+char * initBtmptls(void){
+  
+  char * map = (char *) malloc ((2 * (NB_FAKE_TILES) * sizeof(char)));
+  if(map == NULL){
+    printf("map pointer NULL\n");
+    exit(EXIT_FAILURE);
+  }       
+
+  //int idMap;
+  for (int i=0;i<NB_FAKE_TILES;i++){
+    *(map+i)=0;
+  }
+  for (int i=0;i<NB_FAKE_TILES;i++){
+    *(map+NB_FAKE_TILES+i)=1;
+  }
+    //printf("init a : %d \n",*(map+(NB_TILES_TOT)+i));
+  
+  return map;
+}
+
+void printBitmaps(void){
+
+  printf("Current bitmap : \n");
+  for(int i = 0; i<NB_TILES_X; i++){
+    for(int j = 0; j<NB_TILES_Y; j++){
+      printf(" %d ", cur_map(i,j));
+    }
+    printf("\n");
+  }
+  printf("\n Next bitmap : \n");
+  for(int i = 0; i<NB_TILES_X; i++){
+    for(int j = 0; j<NB_TILES_Y; j++){
+      printf(" %d ", next_map(i,j));
+    }
+    printf("\n");
+  }
+}
+
+void deleteCurrentBtmp(){ 
+  #pragma omp parallel for schedule(dynamic)
+  for(int j = 0;j<NB_TILES_Y; j++){
+    for(int i = 0; i<NB_TILES_X; i+=VEC_SIZE_CHAR){
+      _mm256_storeu_si256((void*)(bitMapTls+(NB_FAKE_TILES*curTable)+(j+1)*(NB_FAKE_X)+(i+1)),zero);
+      //*(bitMapTls+(NB_FAKE_TILES*curTable)+j*(NB_FAKE_X)+i)=0;
+    }
+  }
+}
+
+unsigned tilePosition(int i, int j){
+   return top * isTileOnTop(i,j) + bot * isTileOnBottom(i,j) + 
+          left * isTileOnLeft(i,j) + right * isTileOnRight(i,j);
+}
+
+void prntAVXi( __m256i vec,char * name){
+  int byteSize = sizeof(char);
+  const size_t n = sizeof(__m256i) / byteSize;
+  char buffer[n];
+  _mm256_storeu_si256((void*)buffer, vec);
+  int i = 0;
+  printf("%s : ",name);
+  for (; i < 32 ; i++){
+      //if(buffer[i]!=0)
+         
+      printf("%u.",buffer[i]);
+      
+  }
+  printf(" ~ i : %d\n",i);
+}
+
+static inline bool hasNeighbourChanged(unsigned i,unsigned j){
+  //printf("isok\n");
+  // #define cur_map(y, x) (*table_map ((bitMapTls+(curTable*NB_FAKE_TILES)), (y), (x)))
+  
+  bool nChanged = cur_map(i,j)|cur_map(i-1,j)|cur_map(i+1,j)|cur_map(i,j-1)|cur_map(i,j+1)
+  |cur_map(i-1,j-1)|cur_map(i+1,j+1)|cur_map(i+1,j-1)|cur_map(i-1,j+1);
+
+  return  nChanged;
+}
+
+void life_init (void)
+{
+  // life_init may be (indirectly) called several times so we check if data were
+  // already allocated
+  if (_table == NULL) {
+    const unsigned size = (DIM+2) * (DIM+2) * sizeof (cell_t);
+
+    PRINT_DEBUG ('u', "Memory footprint = 2 x %d bytes\n", size);
+
+    _table = mmap (NULL, size, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0 );
+
+    _alternate_table = mmap (NULL, size, PROT_READ | PROT_WRITE,
+                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  }
+  if(bitMapTls==NULL)
+    bitMapTls = initBtmptls(); 
+  zero = _mm256_setzero_si256(); 
+}
+
+void life_finalize (void)
+{
+  // printf("finalize\n");
+  const unsigned size = (DIM+2) * (DIM+2) * sizeof (cell_t);
+
+  munmap (_table, size);
+  munmap (_alternate_table, size);
+  
+  if(bitMapTls!=NULL)
+    free(bitMapTls);
+}
+
 static inline void swap_tables (void)
 {
   cell_t *tmp = _table;
-
+  switcher = !switcher;
   _table           = _alternate_table;
   _alternate_table = tmp;
 }
@@ -260,7 +244,6 @@ static int compute_new_state (int y, int x)
 
     next_table (y, x) = n;
   }
-
   return change;
 }
 
@@ -341,7 +324,6 @@ unsigned life_compute_tiled (unsigned nb_iter)
 // ./run -k random -s 1024 -ts 128 -i 100 -n -v omp
 unsigned life_compute_omp (unsigned nb_iter)
 {
-
   unsigned res = 0;
 
   for (unsigned it = 1; it <= nb_iter; it++) {
@@ -360,7 +342,6 @@ unsigned life_compute_omp (unsigned nb_iter)
   }
   return res;
 }
-
 
 static int compute_new_state_border (int y, int x)
 {
@@ -387,24 +368,24 @@ static int compute_new_state_border (int y, int x)
       bool istop = isOnTop(x,y);
       bool isbottom = isOnBottom(x,y);
       if(isleft){
-        addTaskBtmp((x-TILE_W)/TILE_W,(y/TILE_H),bitMapTls+nextTable*NB_TILES_TOT);    
+        *next_mapAddr((x-TILE_W)/TILE_W,(y/TILE_H))=1;    
         if(istop)
-          addTaskBtmp((x-TILE_W)/TILE_W,(y-TILE_H)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT);
+          *next_mapAddr((x-TILE_W)/TILE_W,(y-TILE_H)/TILE_H)=1;
         else if(isbottom)
-          addTaskBtmp((x-TILE_W)/TILE_W,(y+1)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT);
+          *next_mapAddr((x-TILE_W)/TILE_W,(y+1)/TILE_H)=1;
       }
       else if (isright){
-        addTaskBtmp((x+1)/TILE_W,(y/TILE_H),bitMapTls+nextTable*NB_TILES_TOT);  
+        *next_mapAddr((x+1)/TILE_W,(y/TILE_H))=1;  
         if(istop)
-          addTaskBtmp((x+1)/TILE_W,(y-TILE_H)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT);
+          *next_mapAddr((x+1)/TILE_W,(y-TILE_H)/TILE_H)=1;
         else if(isbottom)
-          addTaskBtmp((x+1)/TILE_W,(y+1)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT);   
+          *next_mapAddr((x+1)/TILE_W,(y+1)/TILE_H)=1;   
       }
       if(istop){
-        addTaskBtmp((x/TILE_W),(y-TILE_H)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT);   
+        *next_mapAddr((x/TILE_W),(y-TILE_H)/TILE_H)=1;   
       }
       else if (isbottom){
-        addTaskBtmp((x/TILE_W),(y+1)/TILE_H,bitMapTls+nextTable*NB_TILES_TOT);
+        *next_mapAddr((x/TILE_W),(y+1)/TILE_H)=1;
       }
     }
   }
@@ -490,19 +471,15 @@ unsigned life_compute_lazybtmp (unsigned nb_iter){
   unsigned change = 0;
   unsigned res=0;
 
-  // init section of the data structures 
-  if(init){ 
-    changeLock = (omp_lock_t *) malloc(sizeof(omp_lock_t));
-    bitMapTls = initBtmptls(changeLock,curTable);
-    init=false;
-  }
   //main loop
   for(unsigned it=1; it<=nb_iter;it++){
-    //printBitmaps(bitMapTls,curTable);
+    //printBitmaps();
     #pragma omp parallel for collapse(2) schedule(dynamic)
     for(int j = 0; j< NB_TILES_Y;j++){
       for(int i = 0; i< NB_TILES_X;i++){
-        if(*(bitMapTls+curTable*NB_TILES_TOT+(j*NB_TILES_X)+i)==1){
+        //if(*(bitMapTls+curTable*NB_FAKE_TILES+(j*NB_TILES_X)+i)==1){
+        //if(hasNeighbourChanged(i,j)){
+          if(cur_map(i,j)){
             unsigned x=i * TILE_W;
             unsigned y=j * TILE_H;
             unsigned tileChange = 0;
@@ -521,15 +498,14 @@ unsigned life_compute_lazybtmp (unsigned nb_iter){
             
             //If the tile changed, we'll want to compute it in the next itter
             if(tileChange){
-              addTaskBtmp(i,j,bitMapTls+nextTable*NB_TILES_TOT);
+              *next_mapAddr(i,j)=1;
             }
-            change |= tileChange;
-          
+            change |= tileChange; 
         }
       }
     }
-    //printBitmaps(bitMapTls,curTable);
-    deleteBtmp(bitMapTls+curTable*NB_TILES_TOT);
+    //printBitmaps();
+    deleteCurrentBtmp();
     switcher = !switcher;
     swap_tables ();
 
@@ -542,83 +518,120 @@ unsigned life_compute_lazybtmp (unsigned nb_iter){
 return res;
 }
 
-static int compute_new_state_vec (int y, int x)
+void printVecLanes(__m256i * vecLst, int topL, int midL, int botL,char * str){
+  printf("%s",str);
+  prntAVXi(vecLst[topL],"top");
+  prntAVXi(vecLst[midL],"mid");
+  prntAVXi(vecLst[botL],"bot");
+}
+
+/////////////////////////////////////////// vectorial version
+
+//must be called on tiles of width's sizes multiple of 32
+static int do_tile_reg_vec (int x, int y, int width, int height)
 {
-
+  unsigned  tileChange = 0;
+ 
+  __m256i vecTabLeft[3];
+  __m256i vecTabMid[3];
+  __m256i vecTabRight[3];
   
-  //__m256i maskToAply =  _mm256_set1_epi8(1);
-
-
-  __m256i LtopVec = _mm256_loadu_si256((void*)(&cur_table(y-1,x-1)));
-  __m256i LmidVec = _mm256_loadu_si256((void*)(&cur_table(y,x-1)));
-  __m256i LbotVec = _mm256_loadu_si256((void*)(&cur_table(y+1,x-1)));
-
-  __m256i topVec = _mm256_loadu_si256((void*)(&cur_table(y-1,x)));
-  __m256i midVec = _mm256_loadu_si256((void*)(&cur_table(y,x)));
-  __m256i botVec = _mm256_loadu_si256((void*)(&cur_table(y+1,x)));
-
-  __m256i RtopVec = _mm256_loadu_si256((void*)(&cur_table(y-1,x+1)));
-  __m256i RmidVec = _mm256_loadu_si256((void*)(&cur_table(y,x+1)));
-  __m256i RbotVec = _mm256_loadu_si256((void*)(&cur_table(y+1,x+1)));
-
   __m256i mask1 = _mm256_set1_epi8(1);
   __m256i change = _mm256_set1_epi8(0);
   __m256i nVec = _mm256_set1_epi8(0);
-  __m256i meVec = _mm256_loadu_si256((void*)(&cur_table(y,x)));
-  meVec = _mm256_and_si256(meVec,mask1);
 
-  __m256i totVec = _mm256_add_epi8(\
-                        _mm256_add_epi8(\
-                          topVec,\
-                          botVec),\
-                        midVec);
-  __m256i LtotVec = _mm256_add_epi8(\
-                        _mm256_add_epi8(\
-                          LtopVec,\
-                          LbotVec),\
-                        LmidVec);
-  __m256i RtotVec = _mm256_add_epi8(\
-                        _mm256_add_epi8(\
-                          RtopVec,\
-                          RbotVec),\
-                        RmidVec);
+  unsigned cnt = 0;
   
-  nVec =_mm256_add_epi8(totVec,\
-          _mm256_add_epi8(LtotVec,RtotVec));
-          
-  __m256i neq3 = _mm256_and_si256(_mm256_cmpeq_epi8(nVec,_mm256_set1_epi8(3)),mask1);
-  __m256i meP3 = _mm256_add_epi8(meVec,_mm256_set1_epi8(3));
-  __m256i neqMeP3 = _mm256_and_si256(_mm256_cmpeq_epi8(nVec,meP3),mask1);
-
-  nVec =  _mm256_or_si256(neqMeP3,neq3);
-  change = _mm256_xor_si256(nVec,meVec);
-  nVec = _mm256_and_si256(nVec,mask1);
-
-  _mm256_storeu_si256((void*)&(next_table(y,x)),nVec);
+  #define toplane  ((cnt)%3)
+  #define midlane  ((cnt+1)%3)
+  #define botlane ((cnt+2)%3)
   
-  bool vecChange = ! _mm256_testz_si256(_mm256_or_si256(change,_mm256_setzero_si256()), _mm256_set1_epi8(1));
-      //printf("change : %d\n",vecChange);
-  // if(setback!=0)
-  //   exit(0);
-  return vecChange;
-}
-
-static int do_tile_reg_vec (int x, int y, int width, int height)
-{
-  int change = 0;
+  unsigned i = x;
   
-  if(width<(VEC_SIZE_CHAR))
-    change |= do_tile_nocheck (x, y, width, height, omp_get_thread_num());
-  else
-    for (int i = y; i < y + height; i++)
-      for (int j = x; j < x + width; j+=VEC_SIZE_CHAR){
-        int setback = ((j+VEC_SIZE_CHAR)>=width+x)*(32-((x+width)-j)) ;
-        //printf("setback %d \n tile %d * %d ",setback,width,height);
+
+  for ( i = x; i < x + width; i+=VEC_SIZE_CHAR){
+    unsigned j = y;
+    cnt = 0; //counts lines
+
+    vecTabLeft[toplane] = _mm256_loadu_si256((void*)(&cur_table(j-1,i-1)));
+    vecTabLeft[midlane] = _mm256_loadu_si256((void*)(&cur_table(j,i-1)));
+    vecTabLeft[botlane] = _mm256_loadu_si256((void*)(&cur_table(j+1,i-1)));
+
+    vecTabRight[toplane] = _mm256_loadu_si256((void*)(&cur_table(j-1,i+1)));
+    vecTabRight[midlane] = _mm256_loadu_si256((void*)(&cur_table(j,i+1)));
+    vecTabRight[botlane] = _mm256_loadu_si256((void*)(&cur_table(j+1,i+1)));
+
+    vecTabMid[toplane] = _mm256_loadu_si256((void*)(&cur_table(j-1,i)));
+    vecTabMid[midlane] = _mm256_loadu_si256((void*)(&cur_table(j,i)));
+    vecTabMid[botlane] = _mm256_loadu_si256((void*)(&cur_table(j+1,i)));
+    
+    for ( j = y; j < y + height; j++){
+      //printf("       %d / %d\n",j-y,height);
+      // printf("\n\n\n=============New Line===========\n");
+      // printf(" %d - %d / %d\n",i,i+height,y+height);
+      // printVecLanes(vecTabMid,toplane,midlane,botlane,"MIDDLE\n");
+      //printVecLanes(vecTabLeft,toplane,midlane,botlane,"LEFT\n");
+      //printVecLanes(vecTabRight,toplane,midlane,botlane,"RIGHT\n");
+
+      __m256i MtotVec = _mm256_add_epi8(\
+                            _mm256_add_epi8(\
+                              vecTabMid[toplane],\
+                              vecTabMid[midlane]),\
+                            vecTabMid[botlane]);
+      __m256i LtotVec = _mm256_add_epi8(\
+                            _mm256_add_epi8(\
+                              vecTabLeft[toplane],\
+                              vecTabLeft[midlane]),\
+                            vecTabLeft[botlane]);
+      __m256i RtotVec = _mm256_add_epi8(\
+                            _mm256_add_epi8(\
+                              vecTabRight[toplane],\
+                              vecTabRight[midlane]),\
+                            vecTabRight[botlane]);
       
-        change |= compute_new_state_vec (i, j-setback);
-      }
+      nVec =_mm256_add_epi8(MtotVec,\
+              _mm256_add_epi8(LtotVec,RtotVec));
+      
+      // prntAVXi(nVec,"NVc");
+        
+      __m256i neq3 = _mm256_and_si256(_mm256_cmpeq_epi8(nVec,_mm256_set1_epi8(3)),mask1);
+      __m256i meP3 = _mm256_add_epi8(vecTabMid[midlane],_mm256_set1_epi8(3));
+      __m256i neqMeP3 = _mm256_and_si256(_mm256_cmpeq_epi8(nVec,meP3),mask1);
 
-  return change;
+      nVec =  _mm256_or_si256(neqMeP3,neq3);
+      change = _mm256_xor_si256(nVec,vecTabMid[midlane]);
+      nVec = _mm256_and_si256(nVec,mask1);
+
+      // printf("\nWho must live\n");
+      // prntAVXi(nVec,"Nvc");
+
+      _mm256_storeu_si256((void*)(next_tableAddr(j,i)),nVec);
+      
+      bool vecChange = ! _mm256_testz_si256(_mm256_or_si256(change,_mm256_setzero_si256()), _mm256_set1_epi8(1));
+      tileChange |= vecChange;
+
+      //  printf("\n----rollout----\n");
+      // printVecLanes(vecTabMid,toplane,midlane,botlane,"MIDDLE\n");
+      // printVecLanes(vecTabLeft,toplane,midlane,botlane,"LEFT\n");
+      // printVecLanes(vecTabRight,toplane,midlane,botlane,"RIGHT\n");
+
+      // Rolling the roles
+      vecTabRight[toplane]=_mm256_loadu_si256((void*)(&cur_table(j+2,i+1)));
+      vecTabLeft[toplane]=_mm256_loadu_si256((void*)(&cur_table(j+2,i-1)));
+      vecTabMid[toplane]=_mm256_loadu_si256((void*)(&cur_table(j+2,i)));
+      cnt++;
+      // printf("\n---rollout done\n");
+      // printVecLanes(vecTabMid,toplane,midlane,botlane,"MIDDLE\n");
+      // printVecLanes(vecTabLeft,toplane,midlane,botlane,"LEFT\n");
+      // printVecLanes(vecTabRight,toplane,midlane,botlane,"RIGHT\n");
+
+      // if(!_mm256_testz_si256(_mm256_xor_si256(nVec,_mm256_setzero_si256()), _mm256_set1_epi32(1)))
+      //   exit(0);
+    }
+  }
+  // if(tileChange)
+  //   exit(0);
+  return tileChange;
 }
 
 static int do_tile_vec (int x, int y, int width, int height, int who)
@@ -634,27 +647,6 @@ static int do_tile_vec (int x, int y, int width, int height, int who)
   return r;
 }
 
-/**
- * Calls the best kernel with the best parameters according
- * to the tile position amongst others
- * 
- * example, if the tile is surrounded by other tiles, it wont 
- * verify the tiles borders
- * 
- */
-bool tileLauncher (unsigned i, unsigned j){
-  bool tileChange = false;
-  unsigned x=i * TILE_W;
-  unsigned y=j * TILE_H;
-  tileChange = do_tile_border(x,y,TILE_W,1,omp_get_thread_num());//top
-  tileChange |= do_tile_border(x,y+1,1,TILE_H-2,omp_get_thread_num());//left
-  tileChange |= do_tile_vec (x+1, y+1 , TILE_W-2, TILE_H-2, omp_get_thread_num());//inner tile
-  tileChange |= do_tile_border(x+TILE_W-1,y+1,1,TILE_H-2,omp_get_thread_num());//right
-  tileChange |= do_tile_border(x,y+TILE_H-1,TILE_W,1,omp_get_thread_num());//bot
-  
-  return tileChange;
-}
-
 //////////////////////// BitMap2 lazy vectorial Version ;
 // ./run -k life -s 2048 -ts 64 -v lazybtmpvec -m
 // ./run -k life -a random -s 2048 -ts 32 -v lazybtmpvec -m
@@ -663,29 +655,22 @@ unsigned life_compute_lazybtmpvec (unsigned nb_iter){
   unsigned change = 0;
   unsigned res=0;
 
-  if(init){ 
-    changeLock = (omp_lock_t *) malloc(sizeof(omp_lock_t));
-    bitMapTls = initBtmptls(changeLock,curTable);
-    init=false;
-  }
-
   for(unsigned it=1; it<=nb_iter;it++){
-
     #pragma omp parallel for collapse(2) schedule(dynamic)
     for(int i = 0; i< NB_TILES_X;i++){
-      for(int j = 0; j< NB_TILES_Y;j++){
-        if(*(bitMapTls+curTable*NB_TILES_TOT+(j*NB_TILES_X)+i)){
-            unsigned tileChange = false;
-            tileChange = tileLauncher(i,j);
-            if(tileChange){
-              addTaskBtmp(i,j,bitMapTls+nextTable*NB_TILES_TOT);
-            }
-            change |= tileChange;    
+      for(int j = 0; j< NB_TILES_Y;j++){       
+        if(hasNeighbourChanged(i,j)){
+          unsigned x=i * TILE_W;
+          unsigned y=j * TILE_H;
+          unsigned tileChange = false;
+          unsigned who = omp_get_thread_num();
+          tileChange = do_tile_vec(x, y , TILE_W, TILE_H, who);
+          *next_mapAddr(i,j)=tileChange;
+          change |= tileChange;    
         }
-      }
+      } 
     }
-    deleteBtmp(bitMapTls+curTable*NB_TILES_TOT);
-    switcher = !switcher;
+    deleteCurrentBtmp();
     swap_tables ();
     if (!change) { // we stop when all cells are stable
       res = it;
@@ -700,62 +685,15 @@ return res;
 // ./run -k random -s 1024 -ts 128 -i 100 -n -v omp
 unsigned life_compute_ompvec (unsigned nb_iter)
 {
-
   unsigned res = 0;
-
   for (unsigned it = 1; it <= nb_iter; it++) {
     unsigned change = 0;
-    #pragma omp parallel for collapse(2) schedule (dynamic)
-    for (int y = 0; y < DIM; y += TILE_H)
-      for (int x = 0; x < DIM; x += TILE_W){
-        unsigned tilepos =tilePosition(x/TILE_W,y/TILE_H);
-        unsigned who = 0;//omp_get_thread_num();
-        switch(tilepos){
-          case top : 
-            change |= do_tile(x, y, TILE_W, 1, who);//top
-            change |= do_tile_vec (x, y+1, TILE_W, TILE_H-1, who);
-          ;break;
-          case topleft : 
-            change |= do_tile(x, y, TILE_W, 1, who);//top
-            change |= do_tile(x, y-1, 1, TILE_H-1, who);//left
-            change |= do_tile_vec (x+1, y+1, TILE_W-1, TILE_H-1, who);
-          ;break;
-          case left : 
-            change |= do_tile(x, y, 1, TILE_H, who);//left
-            change |= do_tile_vec (x+1, y, TILE_W-1, TILE_H, who);
-          ;break;
-          case botleft : 
-            change |= do_tile(x, y+TILE_H-1, TILE_W, 1, who);//bot
-            change |= do_tile(x, y, 1, TILE_H-1, who);//left
-            change |= do_tile_vec (x+1, y, TILE_W-1, TILE_H-1, who);
-          ;break;
-          case bot : 
-            change |= do_tile(x, y+TILE_H-1, TILE_W, 1, who);//bot
-            change |= do_tile_vec (x, y, TILE_W, TILE_H-1, who);
-          ;break;
-          case botright : 
-            change |= do_tile(x, y+TILE_H-1, TILE_W, 1, who);//bot
-            change |= do_tile(x+TILE_W-1, y, 1, TILE_H-1, who);//right
-            change |= do_tile_vec (x, y, TILE_W-1, TILE_H-1, who);
-          ;break;
-          case right : 
-            change |= do_tile(x+TILE_W-1, y, 1, TILE_H, who);//right
-            change |= do_tile_vec (x, y, TILE_W-1, TILE_H, who);
-          ;break;
-          case topright : 
-            change |= do_tile(x, y, TILE_W, 1, who);//top
-            change |= do_tile(x+TILE_W-1, y-1, 1, TILE_H-1, who);//right
-            change |= do_tile_vec (x, y+1, TILE_W-1, TILE_H-1, who);
-          ;break;
-
-          default: change |= do_tile_vec (x, y, TILE_W, TILE_H, who);
-          break;
-        }
-
-        
+    #pragma omp parallel for schedule (dynamic)
+    for (int y = 0; y < DIM; y+=TILE_H)
+      for (int x = 0; x < DIM; x+=TILE_W){
+        change |=  do_tile_vec(x, y , TILE_W, TILE_H, omp_get_thread_num());   
       }
-    swap_tables ();
-    
+    swap_tables ();  
     if (!change) { // we stop when all cells are stable
       res = it;
       break;
