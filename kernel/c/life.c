@@ -147,8 +147,7 @@ void deleteCurrentBtmp(){
   #pragma omp parallel for schedule(dynamic)
   for(int j = 0;j<NB_TILES_Y; j++){
     for(int i = 0; i<NB_TILES_X; i+=VEC_SIZE_CHAR){
-      _mm256_storeu_si256((void*)(bitMapTls+(NB_FAKE_TILES*curTable)+(j+1)*(NB_FAKE_X)+(i+1)),zero);
-      //*(bitMapTls+(NB_FAKE_TILES*curTable)+j*(NB_FAKE_X)+i)=0;
+      _mm256_storeu_si256((void*)cur_mapAddr(i,j),zero);
     }
   }
 }
