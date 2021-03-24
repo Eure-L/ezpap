@@ -668,7 +668,7 @@ static bool hasAnyTileChanged(void){
 //////////////////////// BitMap2 lazy vectorial Version ;
 // ./run -k life -s 2048 -ts 64 -v lazybtmpvec -m
 // ./run -k life -a random -s 2048 -ts 32 -v lazybtmpvec -m
-// ./run -k life -a otca_off -s 2196 -ts 61 -v lazybtmpvec -m
+// ./run -k life -a otca_off -s 2176 -ts 64 -v lazybtmpvec -m
 unsigned life_compute_lazybtmpvec (unsigned nb_iter){
   unsigned change = 0;
   unsigned res=0;
