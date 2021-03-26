@@ -99,7 +99,16 @@ void border_collision (__global calc_t * pos, __global calc_t * speed,
 		  __constant calc_t * min, __constant calc_t * max,
 		  calc_t radius, unsigned natoms, unsigned offset)
 {
-  // TODO
+  int index = get_global_id(0)
+  if(pos[index] < min.x || pos[index] < min.x )
+
+  pos+= offset;
+  if(pos[index] < min.y || pos[index] < max.y )
+
+  pos+= offset;
+  if(pos[index] < min.z || pos[index] < max.z )
+
+
 }
 
 
