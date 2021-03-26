@@ -6,7 +6,10 @@ __kernel void sample_ocl (__global unsigned *img)
   int x = get_global_id (0);
   int y = get_global_id (1);
 
-  unsigned color = 0xFFFF00FF; // opacity
-  if((get_group_id (0) + get_group_id (1)) % 2)
-    img [y * DIM + x] = color;
+  //unsigned color = 0xFFFF00FF; // opacity
+
+  int red = x & 255;
+  int blue = y & 255;
+
+  img [y * DIM + x] = ((red << 24) | (blue <<8) | (255));
 }

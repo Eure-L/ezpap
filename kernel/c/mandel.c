@@ -249,9 +249,6 @@ static unsigned compute_one_pixel (int i, int j)
   return iteration_to_color (iter);
 }
 
-///////////////////////////////////////////////////////////////////////////
-// Copy this second part and insert at the end of mandel.c
-
 #if defined(ENABLE_VECTO) && (AVX2 == 1)
 #include <immintrin.h>
 
@@ -336,3 +333,149 @@ static void do_tile_vec (int x, int y, int width, int height,int who)
 
 #endif
 ///////////////////////////////////////////////////////////////////////////
+
+///////////////////////////// OpenCL version (ocl)
+// Suggested cmdline:
+// ./run -k mandel -o
+//
+unsigned mandel_invoke_ocl (unsigned nb_iter)
+{
+  size_t global[2] = {GPU_SIZE_X, GPU_SIZE_Y};
+  size_t local[2]  = {GPU_TILE_W, GPU_TILE_H};
+  cl_int err;
+  unsigned max_iter = MAX_ITERATIONS;
+
+  monitoring_start_tile (easypap_gpu_lane (TASK_TYPE_COMPUTE));
+
+  for (unsigned it = 1; it <= nb_iter; it++) {
+
+    // Set kernel arguments
+    //
+    err = 0;
+    err |= clSetKernelArg (compute_kernel, 0, sizeof (cl_mem), &cur_buffer);
+    err |= clSetKernelArg (compute_kernel, 1, sizeof (float), &leftX);
+    err |= clSetKernelArg (compute_kernel, 2, sizeof (float), &xstep);
+    err |= clSetKernelArg (compute_kernel, 3, sizeof (float), &topY);
+    err |= clSetKernelArg (compute_kernel, 4, sizeof (float), &ystep);
+    err |= clSetKernelArg (compute_kernel, 5, sizeof (unsigned), &max_iter);
+
+    check (err, "Failed to set kernel arguments");
+
+    err = clEnqueueNDRangeKernel (queue, compute_kernel, 2, NULL, global, local,
+                                  0, NULL, NULL);
+    check (err, "Failed to execute kernel");
+
+    zoom ();
+  }
+
+  clFinish (queue);
+
+  monitoring_end_tile (0, 0, DIM, DIM, easypap_gpu_lane (TASK_TYPE_COMPUTE));
+
+  return 0;
+}
+
+///////////////////////////// OpenCL bybrid version (ocl_hybrid)
+
+// Threashold = 10%
+#define THRESHOLD 10
+
+static unsigned cpu_y_part;
+static unsigned gpu_y_part;
+
+void mandel_init_ocl_hybrid (void)
+{
+  if (GPU_TILE_H != TILE_H)
+    exit_with_error ("CPU and GPU Tiles should have the same height (%d != %d)",
+                     GPU_TILE_H, TILE_H);
+
+  cpu_y_part = (NB_TILES_Y / 2) * GPU_TILE_H; // Start with fifty-fifty
+  gpu_y_part = DIM - cpu_y_part;
+}
+
+static long gpu_duration = 0, cpu_duration = 0;
+
+static int much_greater_than (long t1, long t2)
+{
+  return (t1 > t2) && ((t1 - t2) * 100 / t1 > THRESHOLD);
+}
+
+unsigned mandel_invoke_ocl_hybrid (unsigned nb_iter)
+{
+  size_t global[2] = {DIM, gpu_y_part};
+  size_t local[2]  = {GPU_TILE_W, GPU_TILE_H};
+  cl_int err;
+  unsigned max_iter = MAX_ITERATIONS;
+  cl_event kernel_event;
+  long t1, t2;
+  int gpu_accumulated_lines = 0;
+
+  for (unsigned it = 1; it <= nb_iter; it++) {
+    
+    // Load balancing
+    if (gpu_duration) {
+      if (much_greater_than (gpu_duration, cpu_duration) &&
+          gpu_y_part > GPU_TILE_H) {
+        gpu_y_part -= GPU_TILE_H;
+        cpu_y_part += GPU_TILE_H;
+        global[1] = gpu_y_part;
+      } else if (much_greater_than (cpu_duration, gpu_duration) &&
+                 cpu_y_part > GPU_TILE_H) {
+        cpu_y_part -= GPU_TILE_H;
+        gpu_y_part += GPU_TILE_H;
+        global[1] = gpu_y_part;
+      }
+    }
+
+    // Set kernel arguments
+    //
+    err = 0;
+    err |= clSetKernelArg (compute_kernel, 0, sizeof (cl_mem), &cur_buffer);
+    err |= clSetKernelArg (compute_kernel, 1, sizeof (float), &leftX);
+    err |= clSetKernelArg (compute_kernel, 2, sizeof (float), &xstep);
+    err |= clSetKernelArg (compute_kernel, 3, sizeof (float), &topY);
+    err |= clSetKernelArg (compute_kernel, 4, sizeof (float), &ystep);
+    err |= clSetKernelArg (compute_kernel, 5, sizeof (unsigned), &max_iter);
+    err |= clSetKernelArg (compute_kernel, 6, sizeof (unsigned), &cpu_y_part);
+    check (err, "Failed to set kernel arguments");
+
+    // Launck GPU kernel
+    err = clEnqueueNDRangeKernel (queue, compute_kernel, 2, NULL, global, local,
+                                  0, NULL, &kernel_event);
+    check (err, "Failed to execute kernel");
+    clFlush (queue);
+
+    // Compute CPU part
+    t1 = what_time_is_it ();
+
+#pragma omp parallel for collapse(2) schedule(runtime)
+    for (int y = 0; y < cpu_y_part; y += TILE_H)
+      for (int x = 0; x < DIM; x += TILE_W)
+        do_tile (x, y, TILE_W, TILE_H, omp_get_thread_num ());
+
+    t2           = what_time_is_it ();
+    cpu_duration = t2 - t1;
+
+    clFinish (queue);
+
+    gpu_duration = ocl_monitor (kernel_event, 0, cpu_y_part, global[0],
+                                global[1], TASK_TYPE_COMPUTE);
+    clReleaseEvent (kernel_event);
+
+    gpu_accumulated_lines += gpu_y_part;
+
+    zoom ();
+  }
+
+  if (do_display) {
+    // Send CPU contribution to GPU memory
+    err = clEnqueueWriteBuffer (queue, cur_buffer, CL_TRUE, 0,
+                                DIM * cpu_y_part * sizeof (unsigned), image, 0,
+                                NULL, NULL);
+    check (err, "Failed to write to buffer");
+  } else
+    PRINT_DEBUG ('u', "In average, GPU took %.1f%% of the lines\n",
+                 (float)gpu_accumulated_lines * 100 / (DIM * nb_iter));
+
+  return 0;
+}
