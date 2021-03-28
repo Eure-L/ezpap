@@ -41,6 +41,11 @@ static inline char *table_map (char * i, int x, int y)
   return i + (y+1) * NB_FAKE_X + (x+1);
 }
 
+static inline char *fake_map (char * i, int x, int y)
+{
+  return i + (y) * NB_FAKE_X + (x);
+}
+
 
 // This kernel does not directly work on cur_img/next_img.
 // Instead, we use 2D arrays of boolean values, not colors
@@ -49,7 +54,12 @@ static inline char *table_map (char * i, int x, int y)
 #define next_tableAddr(y, x) (table_cell (_alternate_table, (y), (x)))
 
 #define cur_map(x, y) (*table_map ((bitMapTls+(curTable*NB_FAKE_TILES)), (x), (y)))
+#define cur_fmap(x, y) (*fake_map ((bitMapTls+(curTable*NB_FAKE_TILES)), (x), (y)))
+
 #define cur_mapAddr(x, y) (table_map ((bitMapTls+(curTable*NB_FAKE_TILES)), (x), (y)))
+#define cur_fmapAddr(x, y) (fake_map ((bitMapTls+(curTable*NB_FAKE_TILES)), (x), (y)))
+
+
 #define next_map(x, y) (*table_map ((bitMapTls+(nextTable*NB_FAKE_TILES)), (x), (y)))
 #define next_mapAddr(x, y) (table_map ((bitMapTls+(nextTable*NB_FAKE_TILES)), (x), (y)))
 
@@ -120,7 +130,7 @@ char * initBtmptls(void){
   for (int i=0;i<NB_FAKE_TILES;i++){
     *(map+NB_FAKE_TILES+i)=1;
   }
-    //printf("init a : %d \n",*(map+(NB_TILES_TOT)+i));
+  //printf("init a : %d \n",*(map+(NB_TILES_TOT)+i));
   
   return map;
 }
@@ -144,12 +154,21 @@ void printBitmaps(void){
 }
 
 void deleteCurrentBtmp(){ 
+  #if 0
   #pragma omp parallel for schedule(dynamic)
   for(int j = 0;j<NB_TILES_Y; j++){
     for(int i = 0; i<NB_TILES_X; i+=VEC_SIZE_CHAR){
       _mm256_storeu_si256((void*)cur_mapAddr(i,j),zero);
     }
   }
+  #else
+  #pragma omp parallel for schedule(dynamic)
+  for(int j = 0;j<NB_FAKE_Y; j++){
+    for(int i = 0; i<NB_FAKE_X; i++){
+      cur_fmap(i,j)=0;
+    }
+  }
+  #endif
 }
 
 unsigned tilePosition(int i, int j){
@@ -188,7 +207,7 @@ void life_init (void)
   // life_init may be (indirectly) called several times so we check if data were
   // already allocated
   if (_table == NULL) {
-    const unsigned size = (DIM+VEC_SIZE_CHAR*2) * (DIM+VEC_SIZE_CHAR*2) * sizeof (cell_t);
+    const unsigned size = (DIM+VEC_SIZE_CHAR*2) * (DIM+2) * sizeof (cell_t);
     PRINT_DEBUG ('u', "Memory footprint = 2 x %d bytes\n", size);
 
     _table = mmap (NULL, size, PROT_READ | PROT_WRITE,
@@ -205,7 +224,7 @@ void life_init (void)
 void life_finalize (void)
 {
   // printf("finalize\n");
-  const unsigned size = (DIM+VEC_SIZE_CHAR*2) * (DIM+VEC_SIZE_CHAR*2)  * sizeof (cell_t);
+  const unsigned size = (DIM+VEC_SIZE_CHAR*2) * (DIM+2)  * sizeof (cell_t);
 
   munmap (_table, size);
   munmap (_alternate_table, size);
