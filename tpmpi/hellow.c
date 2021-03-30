@@ -11,7 +11,6 @@ int main( int argc, char *argv[] )
 {
     int rank;
     int size;
-    
     /* initialiser MPI, à faire _toujours_ en tout premier du programme */
     MPI_Init(&argc,&argv);
     
@@ -19,8 +18,22 @@ int main( int argc, char *argv[] )
     /* récupérer son propre numéro */
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     
-        /* récupérer le nombre de processus lancés */
+    /* récupérer le nombre de processus lancés */
     MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    char buf[1];
+    MPI_Status status;
+
+    if(rank == 0){
+        buf[0]=99;
+        MPI_Send(&buf,1,MPI_CHAR,1,0,MPI_COMM_WORLD);
+    }
+    else if(rank == 1){
+        printf("before rcv %d \n",buf[0]);
+        MPI_Recv(&buf,1,MPI_CHAR,0,0,MPI_COMM_WORLD,&status);
+        printf("after rcv %d \n",buf[0]);
+
+    }
 
     char processor_name[MPI_MAX_PROCESSOR_NAME];
     int name_len;

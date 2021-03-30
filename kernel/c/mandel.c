@@ -479,3 +479,64 @@ unsigned mandel_invoke_ocl_hybrid (unsigned nb_iter)
 
   return 0;
 }
+
+static int rank, size;
+unsigned buffer[(TILE_H+2)*TILE_W];
+unsigned duplicata [size][(TILE_H+2)*TILE_W];
+
+void mandel_init_mpi ()
+{
+  easypap_check_mpi ();// check if MPI was correctly configured
+
+  /* récupérer son propre numéro */
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  /* récupérer le nombre de processus lancés */
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+  mandel_init ();
+
+}
+
+static int rankTop (int rank)
+{
+  return rank * TILE_H; // indice 1ere ligne
+}
+
+static int rankSize (int rank)
+{
+  if(rank < NB_TILES_Y)
+    return TILE_H;// nombre de lignes
+  return 0;
+}
+
+void mandel_refresh_img_mpi ()
+{
+  // le maitre réceptionne les données
+  // les autres processus envoient les données
+  if(rank == 0){
+    for(int i=1;i<size;i++){
+      MPI_Recv(&cur_img(),1,MPI_CHAR,0,0,MPI_COMM_WORLD,&status);
+    }
+  }
+  else{
+    printf("before rcv %d \n",buf[0]);
+    MPI_Send(&buf,1,MPI_CHAR,1,0,MPI_COMM_WORLD);
+    printf("after rcv %d \n",buf[0]);
+
+  }
+}
+
+////////// MPI basic variant
+// Suggested cmdline:
+// ./run -k mandel -v mpi -mpi "-np 4"  -d M
+
+unsigned mandel_compute_mpi (unsigned nb_iter)
+{
+
+  for(unsigned it = 1; it <= nb_iter; it++) {
+    do_tile (0, rankTop (rank), DIM, rankSize (rank), 0);
+    mandel_refresh_img_mpi();
+    zoom();
+  }
+  return 0;
+}
