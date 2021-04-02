@@ -2,6 +2,8 @@
 #include "easypap.h"
 
 #include <omp.h>
+#include <mpi.h>
+
 
 static unsigned compute_one_pixel (int i, int j);
 static void zoom (void);
@@ -481,8 +483,8 @@ unsigned mandel_invoke_ocl_hybrid (unsigned nb_iter)
 }
 
 static int rank, size;
-unsigned buffer[(TILE_H+2)*TILE_W];
-unsigned duplicata [size][(TILE_H+2)*TILE_W];
+// unsigned buf[(TILE_H+2)*TILE_W];
+// unsigned duplicata [size][(TILE_H+2)*TILE_W];
 
 void mandel_init_mpi ()
 {
@@ -499,13 +501,13 @@ void mandel_init_mpi ()
 
 static int rankTop (int rank)
 {
-  return rank * TILE_H; // indice 1ere ligne
+  return ((rank-1) * (DIM/(size-1)) ); // indice 1ere ligne
 }
 
 static int rankSize (int rank)
 {
-  if(rank < NB_TILES_Y)
-    return TILE_H;// nombre de lignes
+  if(rank < size)
+    return ((DIM/(size-1)));// nombre de lignes
   return 0;
 }
 
@@ -513,17 +515,14 @@ void mandel_refresh_img_mpi ()
 {
   // le maitre réceptionne les données
   // les autres processus envoient les données
-  if(rank == 0){
-    for(int i=1;i<size;i++){
-      MPI_Recv(&cur_img(),1,MPI_CHAR,0,0,MPI_COMM_WORLD,&status);
-    }
-  }
-  else{
-    printf("before rcv %d \n",buf[0]);
-    MPI_Send(&buf,1,MPI_CHAR,1,0,MPI_COMM_WORLD);
-    printf("after rcv %d \n",buf[0]);
-
-  }
+  // if(rank == 0){
+  //   for(int i=1;i<size;i++){
+  //     MPI_Recv(&cur_img(0,(i-1)*TILE_H),TILE_H*DIM,MPI_INT,i,0,MPI_COMM_WORLD,&status);
+  //   }
+  // }
+  // else{
+  //   MPI_Send(&cur_img(0,(rankTop(rank))),TILE_H*DIM,MPI_INT,1,0,MPI_COMM_WORLD);
+  // }
 }
 
 ////////// MPI basic variant
@@ -534,7 +533,8 @@ unsigned mandel_compute_mpi (unsigned nb_iter)
 {
 
   for(unsigned it = 1; it <= nb_iter; it++) {
-    do_tile (0, rankTop (rank), DIM, rankSize (rank), 0);
+    if(rank!=0)
+      do_tile (0, rankTop (rank), DIM, rankSize (rank), rank);
     mandel_refresh_img_mpi();
     zoom();
   }
