@@ -14,6 +14,12 @@
 #define calc_t double
 #endif
 
+// /* Return the absolute value of I.  */
+// static int abs (int i)
+// {
+//   return i < 0 ? -i : i;
+// }
+
 static inline coord_t load3coord (__global calc_t * pos, int offset)
 {
     coord_t f;
@@ -99,15 +105,16 @@ void border_collision (__global calc_t * pos, __global calc_t * speed,
 		  __constant calc_t * min, __constant calc_t * max,
 		  calc_t radius, unsigned natoms, unsigned offset)
 {
-    int index = get_global_id(0);
-  if(pos[index] < min[0] || pos[index] > max[0] )
+  int index = get_global_id(0);
+  int k = index/offset;
+  if(pos[index] < min[k] || pos[index] > max[k] )
     speed[index]= -speed[index];
-  pos+= offset;
-  if(pos[index] < min[1] || pos[index] > max[1] )
-    speed[index]= -speed[index];
-  pos+= offset;
-  if(pos[index] <  min[2] || pos[index] >  max[2] )
-    speed[index]= -speed[index];
+  // pos+= offset;
+  // if(pos[index] < min[1] || pos[index] > max[1] )
+  //   speed[index]= -speed[index];
+  // pos+= offset;
+  // if(pos[index] <  min[2] || pos[index] >  max[2] )
+  //   speed[index]= -speed[index];
 }
 
 
@@ -121,22 +128,33 @@ static void check_collision (__global calc_t * pos, __global calc_t * speed,
 			     unsigned natoms, unsigned offset)
 {
   // TODO
-  int index = get_global_id(0);
+  //int index = get_global_id(0);
 
-  // if(pos[index] < min[0] || pos[index] > max[0] )
-  //   speed[index]= -speed[index];
-  // pos+= offset;
-  // if(pos[index] < min[1] || pos[index] > max[1] )
-  //   speed[index]= -speed[index];
-  // pos+= offset;
-  // if(pos[index] <  min[2] || pos[index] >  max[2] )
-  //   speed[index]= -speed[index];
+  coord_t atom;
+  coord_t other;
+  calc_t distance;
+
+  atom = load3coord(pos+index,offset);
+
+  for(int i = index; i < natoms ; i++){
+    if(i==index)
+      continue;
+
+    other = load3coord(pos+i,offset);
+    distance = squared_dist(atom,other); 
+
+    if(distance < radius){
+      freeze_atom(speed+index,offset);
+      freeze_atom(speed+i,offset);
+    }
+  }
+
     
 }
 
 // This kernel is executed with one thread per atom
 __kernel
-void atom_collision (__global calc_t * pos, __global calc_t * speed,
+void atom_collision1 (__global calc_t * pos, __global calc_t * speed,
 		     calc_t radius, unsigned natoms, unsigned offset)
 {
     unsigned index = get_global_id (0);
@@ -145,12 +163,28 @@ void atom_collision (__global calc_t * pos, __global calc_t * speed,
       check_collision (pos, speed, radius, index, natoms, offset);
 }
 
+__kernel
+void atom_collision (__global calc_t * pos, __global calc_t * speed,
+		     calc_t radius, unsigned natoms, unsigned offset)
+{
+    unsigned index = get_global_id (0);
+
+    if(index < natoms/2){
+      check_collision (pos, speed, radius, index, natoms, offset);
+      check_collision (pos, speed, radius, natoms-index, natoms, offset);
+    }
+}
+
+
 // This kernel is executed with one thread per atom
 __kernel
 void gravity (__global calc_t * speed, calc_t gx, calc_t gy, calc_t gz,
 	      unsigned natoms, unsigned offset)
 {
-  // TODO
+  unsigned index = get_global_id (0);
+  speed[index]+= gx;
+  speed[index+offset]-= gy;
+  speed[index+2*offset]+= gz;
 }
 
 
