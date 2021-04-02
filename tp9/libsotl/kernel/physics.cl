@@ -99,16 +99,15 @@ void border_collision (__global calc_t * pos, __global calc_t * speed,
 		  __constant calc_t * min, __constant calc_t * max,
 		  calc_t radius, unsigned natoms, unsigned offset)
 {
-  int index = get_global_id(0)
-  if(pos[index] < min.x || pos[index] < min.x )
-
+    int index = get_global_id(0);
+  if(pos[index] < min[0] || pos[index] > max[0] )
+    speed[index]= -speed[index];
   pos+= offset;
-  if(pos[index] < min.y || pos[index] < max.y )
-
+  if(pos[index] < min[1] || pos[index] > max[1] )
+    speed[index]= -speed[index];
   pos+= offset;
-  if(pos[index] < min.z || pos[index] < max.z )
-
-
+  if(pos[index] <  min[2] || pos[index] >  max[2] )
+    speed[index]= -speed[index];
 }
 
 
@@ -122,6 +121,17 @@ static void check_collision (__global calc_t * pos, __global calc_t * speed,
 			     unsigned natoms, unsigned offset)
 {
   // TODO
+  int index = get_global_id(0);
+
+  // if(pos[index] < min[0] || pos[index] > max[0] )
+  //   speed[index]= -speed[index];
+  // pos+= offset;
+  // if(pos[index] < min[1] || pos[index] > max[1] )
+  //   speed[index]= -speed[index];
+  // pos+= offset;
+  // if(pos[index] <  min[2] || pos[index] >  max[2] )
+  //   speed[index]= -speed[index];
+    
 }
 
 // This kernel is executed with one thread per atom
