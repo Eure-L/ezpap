@@ -44,7 +44,12 @@ unsigned SIZEY ;
 //returns the word containing the cell // must do a bit shift on the ptr
 static inline cell_t *table_cell_column (cell_t *restrict i, int y, int x)
 { 
-  return i + ((y/8)) * (SIZEX) + (x + 1);
+  return i + (((y+1)/8)+1) * (SIZEX) + (x + 1);
+}
+
+static inline cell_t *table_cell_row (cell_t *restrict i, int y, int x)
+{ 
+  return i + (y+1) * (SIZEX) + (((x+1)/8) + 1);
 }
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
@@ -870,7 +875,7 @@ unsigned life_compute_bits(unsigned nb_iter)
   int change = 0;
   unsigned it = 1;
   for (; it <= nb_iter; it++) {
-    printTable(_table);
+    //printTable(_table);
     //clear_table(_alternate_table);
     monitoring_start_tile (0);
 
