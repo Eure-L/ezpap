@@ -9,7 +9,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-typedef char cell_t;
+typedef int cell_t;
 static unsigned color = 0xFFFF00FF; // Living cells have the yellow color
 
 static cell_t *restrict _table = NULL, *restrict _alternate_table = NULL;
@@ -33,7 +33,7 @@ char threadBuffer[256];
 #define curTable switcher
 #define nextTable !switcher
 
-unsigned bits;
+unsigned bits; // nb of bits in cell_t type
 bool ENABLE_BITCELL = 0;
 unsigned SIZEX ;
 unsigned SIZEY ;
@@ -44,12 +44,12 @@ unsigned SIZEY ;
 //returns the word containing the cell // must do a bit shift on the ptr
 static inline cell_t *table_cell_column (cell_t *restrict i, int y, int x)
 { 
-  return i + (((y+1)/8)+1) * (SIZEX) + (x + 1);
+  return i + (((y+1)/bits)+1) * (SIZEX) + (x + 1);
 }
 
 static inline cell_t *table_cell_row (cell_t *restrict i, int y, int x)
 { 
-  return i + (y+1) * (SIZEX) + (((x+1)/8) + 1);
+  return i + (y+1) * (SIZEX) + (((x+1)/bits) + 1);
 }
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
@@ -125,29 +125,29 @@ static inline unsigned isTileOnBottom(int i,int j){
 
 
 static inline void setnextBitCell(int i, int j, unsigned val){
-  next_table_bits(j,i) = (next_table_bits(j,i) & ~(0x01<<((j)%8))) | (val<<((j)%8));
+  next_table_bits(j,i) = (next_table_bits(j,i) & ~(0x01<<((j)%bits))) | (val<<((j)%bits));
 }
 
 static inline void setcurBitCell(int i, int j, unsigned val){
   // printB(cur_table_bits(j,i));
-  // printf("shift de : %d\n",j%8);
-  // printB((cur_table_bits(j,i) & ~(0x01<<((j)%8))) | (val<<((j)%8)));
+  // printf("shift de : %d\n",j%bits);
+  // printB((cur_table_bits(j,i) & ~(0x01<<((j)%bits))) | (val<<((j)%bits)));
   // printf("\n\n");
-  cur_table_bits(j,i) = (cur_table_bits(j,i) & ~(0x01<<((j)%8))) | (val<<((j)%8));
+  cur_table_bits(j,i) = (cur_table_bits(j,i) & ~(0x01<<((j)%bits))) | (val<<((j)%bits));
 }
 
 //
 static inline cell_t getBitCell(int i, int j){
   // printB(cur_table_bits(j,i));
-  // printf("on veut le : %d\n",j%8);
-  // printf("%d\n",cur_table_bits(j,i)>>((j)%8)&(0x01));
+  // printf("on veut le : %d\n",j%bits);
+  // printf("%d\n",cur_table_bits(j,i)>>((j)%bits)&(0x01));
   // printf("\n\n");
-  return (cur_table_bits(j,i)>>((j)%8)&(0x01));
+  return (cur_table_bits(j,i)>>((j)%bits)&(0x01));
 }
 
 //
-void printB(char mot){
-  for(int i=0;i<8;i++){
+void printB(cell_t mot){
+  for(int i=0;i<bits;i++){
     printf("%d ",(mot>>i)&0x01);
   }
   //exit(0);
@@ -156,13 +156,10 @@ void printB(char mot){
 void printTable(cell_t * table){
   printf("DIM %d\n",DIM);
   printf("SIZEX %d SIZEY %d\n",SIZEX,SIZEY);
-  for(int i =0; i< SIZEY;i++){
-    for(int j=0; j<SIZEX;j++){
+  for(int i =0; i< DIM;i++){
+    for(int j=0; j<DIM;j++){
       if(ENABLE_BITCELL){
-        if(i%8==0){
-          //printf("%d ",*(table+j*SIZEX+i));
-          printB((char)getBitCell(j,i));
-        }
+        printf("%d ",getBitCell(j,i));
       }
       else{
         printf("%d ",*(table+i*SIZEX+j));
@@ -192,6 +189,7 @@ void life_refresh_img_bits (void)
   for (int i = 0; i < DIM; i++){
     for (int j = 0; j < DIM; j++){
         cur_img (i, j) = (getBitCell (j, i) )* color;
+        
     }
   }
 }
@@ -397,22 +395,6 @@ static int compute_new_state (int y, int x)
   return change;
 }
 
-static int compute_byte (int y, int x)
-{
-  unsigned n      = 0;
-  unsigned me     = getBitCell(x,y);
-  unsigned change = 0;
-  
-  for (int i = y - 1; i <= y + 1; i++)
-    for (int j = x - 1; j <= x + 1; j++){
-      n += getBitCell(j,i);
-    }
-  n = (n == 3 + me) | (n == 3);
-  if (n != me)
-    change |= 1;
-  setnextBitCell(x,y,n);
-  return 1;
-}
 ///////////////////////////// Tiled sequential version (tiled)
 
 // Tile inner computation
@@ -747,6 +729,111 @@ static int do_tile_vec (int x, int y, int width, int height, int who)
   return r;
 }
 
+//bitboard kernels
+
+static int compute_wordpix (int y, int x)
+{
+
+    unsigned n      = 0;
+  unsigned me     = getBitCell(x,y);
+  unsigned change = 0;
+  
+  for (int i = y - 1; i <= y + 1; i++)
+    for (int j = x - 1; j <= x + 1; j++){
+      n += getBitCell(j,i);
+    }
+  n = (n == 3 + me) | (n == 3);
+  if (n != me)
+    change |= 1;
+  setnextBitCell(x,y,n);
+  return 1;
+
+  // unsigned n;
+  // unsigned UL, UM, UR,
+  //          ML, me, MR,
+  //          DL, DM, DR;
+  // unsigned change = 0;
+  // 
+  // cell_t res = 0;
+  // 
+  // cell_t tabMIDLeft = cur_table_bits(y,x-1);
+  // cell_t word = cur_table_bits(y,x);
+  // cell_t tabMIDRight = cur_table_bits(y,x+1);
+  //
+  // cell_t tabUPLeft =    getBitCell(x-1,y-1) | (tabMIDLeft >> 1);
+  // cell_t tabUPMid =     getBitCell(x,y-1)   | (word >> 1);
+  // cell_t tabUPRight =   getBitCell(x+1,y-1) | (tabMIDRight >> 1);
+  //
+  // cell_t tabDOWNLeft =  getBitCell(x-1,y+1)  <<  (bits-1)    |( tabMIDLeft << 1);
+  // cell_t tabDOWNMid =   getBitCell(x,  y+1)  <<  (bits-1)    |( word << 1);
+  // cell_t tabDOWNRight = getBitCell(x+1,y+1)  <<  (bits-1)    |( tabMIDRight << 1);
+  //
+  // // printB(tabMIDLeft);printf("\n");
+  // // printB(tabUPLeft);printf("\n");
+  // // printB(tabDOWNLeft);printf("\n\n");
+  // // printB(word);printf("\n");
+  // // printB(tabUPMid);printf("\n");
+  // // printB(tabDOWNMid);printf("\n\n");
+  // // printB(tabMIDRight);printf("\n");
+  // // printB(tabUPRight);printf("\n");
+  // // printB(tabDOWNRight);printf("\n\n\n");
+  //
+  // //printB(word);printf("\n");
+  //
+  // for(int bit = 0; bit<bits; bit++){
+  //   //printf("x,%d  y,%d\n", x,y+bit);
+  //   //n = 0;
+  //   UL =( tabUPLeft>>bit)&0x01;
+  //   UM =( tabUPMid>>bit)&0x01;
+  //   UR= ( tabUPRight>>bit)&0x01;
+  //   ML= ( tabMIDLeft>>bit)&0x01;
+  //   MR= ( tabMIDRight>>bit)&0x01;
+  //   DL= ( tabDOWNLeft>>bit)&0x01;
+  //   DM= ( tabDOWNMid>>bit)&0x01;
+  //   DR= ( tabDOWNRight>>bit)&0x01;
+  //   me = (word>>bit)&0x01;
+  //
+  //   n = UL+UM+UR+ML+me+MR+DL+DM+DR;
+  //   // printf("%d:%d\n",n);
+  //   // printf("n:%d\n",n);
+  //   n = (n == 3 + me) | (n == 3);
+  //   //printf("n:%d\n\n",n);
+  //   if (n != me)
+  //     change |= 1;
+  //   res |= (n)<<bit;
+  // }
+  //
+  // // printf("after word");
+  // // printB(res);printf("\n\n\n");
+  //
+  // next_table_bits(y,x) = res;
+  // return 1;
+}
+
+static int do_tile_reg_bitbrd(int x, int y, int width, int height)
+{
+  int change = 0;
+
+  for (int i = y; i < y + height; i+= bits)
+    for (int j = x; j < x + width; j++)
+      change |= compute_wordpix(i, j);
+
+  return change;
+}
+
+static int do_tile_bitbrd (int x, int y, int width, int height, int who)
+{
+  int r;
+
+  monitoring_start_tile (who);
+  r = do_tile_reg_bitbrd (x, y, width, height);
+  monitoring_end_tile (x, y, width, height, who);
+
+  return r;
+}
+
+
+
 static bool hasAnyTileChanged(void){
   for(int i =0 ; i < 256; i ++){
     if(threadChange[i]){
@@ -875,13 +962,12 @@ unsigned life_compute_bits(unsigned nb_iter)
   int change = 0;
   unsigned it = 1;
   for (; it <= nb_iter; it++) {
-    //printTable(_table);
-    //clear_table(_alternate_table);
+
     monitoring_start_tile (0);
 
-    for (int i = 0; i < DIM+1; i++)
+    for (int i = 0; i < DIM; i++)
       for (int j = 0; j < DIM; j++)
-        change |= compute_byte (i, j);
+        change |= compute_wordpix (i, j);
         
     monitoring_end_tile (0, 0, DIM, DIM, 0);
     
@@ -891,6 +977,7 @@ unsigned life_compute_bits(unsigned nb_iter)
   }
   return 0 ;
 }
+
 
 static inline void swap_buffers(void)
 {
