@@ -24,6 +24,7 @@ char threadChange[256];
 #define AVXBITS 256
 #define VEC_SIZE (AVXBITS/(sizeof(cell_t)*8))
 
+
 #define NB_TILES_TOT (NB_TILES_X*NB_TILES_Y)
 #define NB_FAKE_X (NB_TILES_X + 2)
 #define NB_FAKE_Y (NB_TILES_Y + 2)
@@ -31,6 +32,7 @@ char threadChange[256];
 #define curTable switcher
 #define nextTable !switcher
 
+unsigned bits;
 bool ENABLE_BITCELL = 0;
 unsigned SIZEX ;
 unsigned SIZEY ;
@@ -41,7 +43,7 @@ unsigned SIZEY ;
 //returns the word containing the cell // must do a bit shift on the ptr
 static inline cell_t *table_cell_column (cell_t *restrict i, int y, int x)
 { 
-  return i + ((y+8)/8) * (DIM+2) + (x + 1);
+  return i + ((y/8)+1) * (DIM+2) + (x + 1);
 }
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
@@ -115,21 +117,40 @@ static inline unsigned isTileOnBottom(int i,int j){
 ////
 
 //
-static inline void setBitCell(int i, int j, unsigned val){
+void printB(char mot){
+  for(int i=0;i<8;i++){
+    printf("%d ",(mot>>i)&0x01);
+  }
+  //exit(0);
+  printf("\n");
+}
+
+static inline void setnextBitCell(int i, int j, unsigned val){
   //next_table(j,i)=val;
   //next_table_bits(j,i) = cur_table_bits(j,i) & (val<<(j%8));
   
+  // printB(cur_table_bits(j,i));
+  // printf("on met le %d ==> %d\n",j%8,val);
+  // printB((cur_table_bits(j,i) & ~(0x01<<((j)%8))) | (val<<((j)%8)));
+  // printf("\n\n");
+
   next_table_bits(j,i) = (cur_table_bits(j,i) & ~(0x01<<((j)%8))) | (val<<((j)%8));
 }
 
 static inline void setcurBitCell(int i, int j, unsigned val){
-  //cur_table(j,i)=val;
+  // printB(cur_table_bits(j,i));
+  // printf("shift de : %d\n",j%8);
+  // printB((cur_table_bits(j,i) & ~(0x01<<((j)%8))) | (val<<((j)%8)));
+  // printf("\n\n");
   cur_table_bits(j,i) = (cur_table_bits(j,i) & ~(0x01<<((j)%8))) | (val<<((j)%8));
 }
 
 //
 static inline cell_t getBitCell(int i, int j){
-  //return cur_table(j,i);
+  // printB(cur_table_bits(j,i));
+  // printf("on veut le : %d\n",j%8);
+  // printf("%d\n",cur_table_bits(j,i)>>((j)%8)&(0x01));
+  // printf("\n\n");
   return (cur_table_bits(j,i)>>((j)%8)&(0x01));
 }
 
@@ -143,10 +164,16 @@ void life_refresh_img (void)
 
 void life_refresh_img_bits (void)
 {
-  for (int i = 0; i < DIM; i++)
-    for (int j = 0; j < DIM; j++)
-        cur_img (i, j) = getBitCell (j, i) * color;
-      
+  
+  for (int i = 0; i < DIM; i++){
+    printB(cur_table_bits(0,i));
+        
+
+    for (int j = 0; j < DIM; j++){
+        cur_img (i, j) = (getBitCell (j, i) )* color;
+    }
+  }
+  printf("\n\n");
 }
 
 char * initBtmptls(void){
@@ -238,8 +265,9 @@ static inline bool hasNeighbourChanged(unsigned i,unsigned j){
 
 void life_init (void)
 {
+  bits = sizeof(cell_t)*8;
   SIZEX =(DIM+(2));
-  SIZEY =(DIM+2);
+  SIZEY =(DIM+16);
   if (_table == NULL) {
     const unsigned size = _table_SIZE;
     PRINT_DEBUG ('u', "Memory footprint = 2 x %d bytes\n", size);
@@ -335,19 +363,22 @@ static int compute_new_state (int y, int x)
 static int compute_bit (int y, int x)
 {
   unsigned n      = 0;
-  unsigned me     = (cur_table_bits(y,x)>>((y)%8)&(0x01));
+  unsigned me     = getBitCell(x,y);
   unsigned change = 0;
-    for (int i = y - 1; i <= y + 1; i++)
-      for (int j = x - 1; j <= x + 1; j++)
-        n += (cur_table_bits(i,j)>>((i)%8)&(0x01));
+  
+  //printf("x: %d  y: %d\n",x,y);
+  for (int i = y - 1; i <= y + 1; i++)
+    for (int j = x - 1; j <= x + 1; j++){
+      n += getBitCell(j,i);
+    }
+  //printf("(%d ; %d)  n:%d\n",x,y,n);
+  n = (n == 3 + me) | (n == 3);
+  if (n != me)
+    change |= 1;
 
-    n = (n == 3 + me) | (n == 3);
-    if (n != me)
-      change |= 1;
-    setBitCell(x,y,n);
-    
-
-  return 1;
+  setnextBitCell(x,y,n);
+  
+  return change;
 }
 ///////////////////////////// Tiled sequential version (tiled)
 
