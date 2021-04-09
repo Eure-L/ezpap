@@ -34,7 +34,7 @@ char threadBuffer[256];
 #define nextTable !switcher
 
 unsigned bits; // nb of bits in cell_t type
-bool ENABLE_BITCELL = 0;
+unsigned ENABLE_BITCELL = 0;
 unsigned SIZEX ;
 unsigned SIZEY ;
 
@@ -49,7 +49,7 @@ static inline cell_t *table_cell_column (cell_t *restrict i, int y, int x)
 
 static inline cell_t *table_cell_row (cell_t *restrict i, int y, int x)
 { 
-  return i + (y+1) * (SIZEX) + (((x+1)/bits) + 1);
+  return i + (y+1) * (SIZEX) + (((x)/bits) + VEC_SIZE);
 }
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
@@ -75,6 +75,9 @@ static inline char *fake_map (char * i, int x, int y)
 
 #define cur_table_bits(y, x) ((*table_cell_column (_table, (y), (x))))
 #define next_table_bits(y, x) (*table_cell_column (_alternate_table, (y), (x)))
+
+#define cur_table_row(y, x) ((*table_cell_row (_table, (y), (x))))
+#define next_table_row(y, x) (*table_cell_row (_alternate_table, (y), (x)))
 
 #define cur_map(x, y) (*table_map ((bitMapTls+(curTable*NB_FAKE_TILES)), (x), (y)))
 #define cur_fmap(x, y) (*fake_map ((bitMapTls+(curTable*NB_FAKE_TILES)), (x), (y)))
@@ -122,27 +125,30 @@ static inline unsigned isTileOnBottom(int i,int j){
 }
 ////
 
-
-
 static inline void setnextBitCell(int i, int j, unsigned val){
   next_table_bits(j,i) = (next_table_bits(j,i) & ~(0x01<<((j)%bits))) | (val<<((j)%bits));
 }
 
 static inline void setcurBitCell(int i, int j, unsigned val){
-  // printB(cur_table_bits(j,i));
-  // printf("shift de : %d\n",j%bits);
-  // printB((cur_table_bits(j,i) & ~(0x01<<((j)%bits))) | (val<<((j)%bits)));
-  // printf("\n\n");
   cur_table_bits(j,i) = (cur_table_bits(j,i) & ~(0x01<<((j)%bits))) | (val<<((j)%bits));
+}
+
+static inline void setcurBitCellRow(int i, int j, unsigned val){
+  cur_table_row(j,i) = (cur_table_row(j,i) & ~(0x01<<((i)%bits))) | (val<<((i)%bits));
+}
+
+static inline void setnextBitCellRow(int i, int j, unsigned val){
+  next_table_row(j,i) = 
+  ((next_table_row(j,i)& ~(0x01<<((i%bits)))) | (val<<((i)%bits)));
 }
 
 //
 static inline cell_t getBitCell(int i, int j){
-  // printB(cur_table_bits(j,i));
-  // printf("on veut le : %d\n",j%bits);
-  // printf("%d\n",cur_table_bits(j,i)>>((j)%bits)&(0x01));
-  // printf("\n\n");
   return (cur_table_bits(j,i)>>((j)%bits)&(0x01));
+}
+
+static inline cell_t getBitCellRow(int i, int j){
+  return (cur_table_row(j,i)>>((i)%bits)&(0x01));
 }
 
 //
@@ -188,8 +194,17 @@ void life_refresh_img_bits (void)
 {
   for (int i = 0; i < DIM; i++){
     for (int j = 0; j < DIM; j++){
-        cur_img (i, j) = (getBitCell (j, i) )* color;
-        
+        cur_img (i, j) = (getBitCell (j, i) )* color; 
+    }
+  }
+}
+
+void life_refresh_img_bitbrdvec (void)
+{
+  printf("refresh bitbrdvec\n");
+  for (int i = 0; i < DIM; i++){
+    for (int j = 0; j < DIM; j++){
+        cur_img (i, j) = (getBitCellRow (j, i) )* color; 
     }
   }
 }
@@ -365,6 +380,30 @@ void life_init_bits(void){
 
 }
 
+void life_init_bitbrdvec(void)
+{
+    printf("init bitbrdvec\n");
+  ENABLE_BITCELL = 2;
+  bits = sizeof(cell_t)*8;
+  SIZEX =(DIM/bits+(2*(VEC_SIZE)));
+  SIZEY =(DIM)+2;
+  if (_table == NULL) {
+    const unsigned size = _table_SIZE;
+    PRINT_DEBUG ('u', "Memory footprint = 2 x %d bytes\n", size);
+
+    _table = mmap (NULL, size, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0 );
+
+    _alternate_table = mmap (NULL, size, PROT_READ | PROT_WRITE,
+                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  }
+  if(bitMapTls==NULL)
+    bitMapTls = initBtmptls(); 
+  zero = _mm256_setzero_si256(); 
+  mask1 = _mm256_set1_epi8(1);
+  clear_table(_table);
+}
+
 static inline void swap_tables (void)
 {
   cell_t *tmp = _table;
@@ -420,28 +459,6 @@ static int do_tile (int x, int y, int width, int height, int who)
   return r;
 }
 
-unsigned life_compute_tiled (unsigned nb_iter)
-{
-  unsigned res = 0;
-
-  for (unsigned it = 1; it <= nb_iter; it++) {
-    unsigned change = 0;
-
-    for (int y = 0; y < DIM; y += TILE_H)
-      for (int x = 0; x < DIM; x += TILE_W)
-        change |= do_tile (x, y, TILE_W, TILE_H, 0);
-
-    swap_tables ();
-
-    if (!change) { // we stop when all cells are stable
-      res = it;
-      break;
-    }
-  }
-
-  return res;
-}
-
 
 static int compute_new_state_nocheck (int y, int x)
 {
@@ -495,111 +512,6 @@ void printVecLanes(__m256i * vecLst, int topL, int midL, int botL,char * str){
 }
 
 /////////////////////////////////////////// vectorial version
-
-static int do_tile_reg_vec_bits (int x, int y, int width, int height)
-{
-  unsigned  tileChange = 0;
- 
-  __m256i vecTabLeft[3];
-  __m256i vecTabMid[3];
-  __m256i vecTabRight[3];
-  __m256i MtotVec;
-  __m256i LtotVec;
-  __m256i RtotVec;
-
-  __m256i neq3;
-  __m256i meP3;
-  __m256i neqMeP3;
-
-  __m256i change;
-  __m256i nVec;
-
-  unsigned cnt = 0;
-  
-  #define toplane  ((cnt)%3)
-  #define midlane  ((cnt+1)%3)
-  #define botlane ((cnt+2)%3)
-  
-  unsigned i = x;
-  
-
-  for ( i = x; i < x + width; i+=VEC_SIZE){
-    unsigned j = y;
-    cnt = 0; //counts lines
-
-    vecTabLeft[toplane] = _mm256_loadu_si256((void*)(&cur_table(j-1,i-1)));
-    vecTabLeft[midlane] = _mm256_loadu_si256((void*)(&cur_table(j,i-1)));
-    vecTabLeft[botlane] = _mm256_loadu_si256((void*)(&cur_table(j+1,i-1)));
-
-    vecTabRight[toplane] = _mm256_loadu_si256((void*)(&cur_table(j-1,i+1)));
-    vecTabRight[midlane] = _mm256_loadu_si256((void*)(&cur_table(j,i+1)));
-    vecTabRight[botlane] = _mm256_loadu_si256((void*)(&cur_table(j+1,i+1)));
-
-    vecTabMid[toplane] = _mm256_loadu_si256((void*)(&cur_table(j-1,i)));
-    vecTabMid[midlane] = _mm256_loadu_si256((void*)(&cur_table(j,i)));
-    vecTabMid[botlane] = _mm256_loadu_si256((void*)(&cur_table(j+1,i)));
-    
-    for ( j = y; j < y + height; j++){
-      // printf("       %d / %d\n",j-y,height);
-      // printf("\n\n\n=============New Line===========\n");
-      // printf(" %d - %d / %d\n",i,i+height,y+height);
-      // printVecLanes(vecTabMid,toplane,midlane,botlane,"MIDDLE\n");
-
-      MtotVec = _mm256_add_epi8(\
-                            _mm256_add_epi8(\
-                              vecTabMid[toplane],\
-                              vecTabMid[midlane]),\
-                            vecTabMid[botlane]);
-      LtotVec = _mm256_add_epi8(\
-                            _mm256_add_epi8(\
-                              vecTabLeft[toplane],\
-                              vecTabLeft[midlane]),\
-                            vecTabLeft[botlane]);
-      RtotVec = _mm256_add_epi8(\
-                            _mm256_add_epi8(\
-                              vecTabRight[toplane],\
-                              vecTabRight[midlane]),\
-                            vecTabRight[botlane]);
-
-      nVec =_mm256_add_epi8(MtotVec,\
-              _mm256_add_epi8(LtotVec,RtotVec));
-      
-      // prntAVXi(nVec,"NVc");
-
-      neq3 = _mm256_and_si256(_mm256_cmpeq_epi8(nVec,_mm256_set1_epi8(3)),mask1);
-      meP3 = _mm256_add_epi8(vecTabMid[midlane],_mm256_set1_epi8(3));
-      neqMeP3 = _mm256_and_si256(_mm256_cmpeq_epi8(nVec,meP3),mask1);
-
-      nVec =  _mm256_or_si256(neqMeP3,neq3);
-      change = _mm256_xor_si256(nVec,vecTabMid[midlane]);
-      nVec = _mm256_and_si256(nVec,mask1);
-
-      // printf("\nWho must live\n");
-      // prntAVXi(nVec,"Nvc");
-
-      _mm256_storeu_si256((void*)(&next_table(j,i)),nVec);
-      
-      bool vecChange = ! _mm256_testz_si256(_mm256_or_si256(change,_mm256_setzero_si256()), _mm256_set1_epi8(1));
-      tileChange |= vecChange;
-
-      //  printf("\n----rollout----\n");
-      // printVecLanes(vecTabMid,toplane,midlane,botlane,"MIDDLE\n");
-      // Rolling the roles
-      vecTabRight[toplane]=_mm256_loadu_si256((void*)(&cur_table(j+2,i+1)));
-      vecTabLeft[toplane]=_mm256_loadu_si256((void*)(&cur_table(j+2,i-1)));
-      vecTabMid[toplane]=_mm256_loadu_si256((void*)(&cur_table(j+2,i)));
-      cnt++;
-      // printf("\n---rollout done\n");
-      // printVecLanes(vecTabMid,toplane,midlane,botlane,"MIDDLE\n");
-      // if(!_mm256_testz_si256(_mm256_xor_si256(nVec,_mm256_setzero_si256()), _mm256_set1_epi32(1)))
-      //   exit(0);
-    }
-  }
-  // if(tileChange)
-  //   exit(0);
-
-  return tileChange;
-}
 
 //must be called on tiles of width's sizes multiple of 32
 static int do_tile_reg_vec (int x, int y, int width, int height)
@@ -719,10 +631,7 @@ static int do_tile_vec (int x, int y, int width, int height, int who)
 
   monitoring_start_tile (who);
 
-  if(ENABLE_BITCELL)
-    r = do_tile_reg_vec_bits (x, y, width, height);
-  else
-    r = do_tile_reg_vec (x, y, width, height);
+  r = do_tile_reg_vec (x, y, width, height);
 
   monitoring_end_tile (x, y, width, height, who);
 
@@ -832,7 +741,31 @@ static int do_tile_bitbrd (int x, int y, int width, int height, int who)
   return r;
 }
 
+static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
+{
 
+
+
+  for (int j = y; j < y + height; j++){
+    for (int i = x; i < x + width; i+= AVXBITS){
+      
+    }
+  }
+
+  return change;
+}
+
+
+static int do_tile_bitbrdvec (int x, int y, int width, int height, int who)
+{
+  int r;
+
+  monitoring_start_tile (who);
+  r = do_tile_reg_bitbrdvec (x, y, width, height);
+  monitoring_end_tile (x, y, width, height, who);
+
+  return r;
+}
 
 static bool hasAnyTileChanged(void){
   for(int i =0 ; i < 256; i ++){
@@ -843,14 +776,13 @@ static bool hasAnyTileChanged(void){
   return false;
 }
 
+//////////////////////////////// AVX versions
 
-//////////////////////// BitMap2 lazy vectorial Version ;
+//// lazy vectorial Version ;
 //OMP_PLACES=cores OMP_NUM_THREADS=1 ./run -k life -s 2048 -ts 64 -v lazybtmpvec -m
 //OMP_PLACES=cores OMP_NUM_THREADS=1 ./run -k life -a random -s 2048 -ts 32 -v lazybtmpvec -m
 //OMP_PLACES=cores OMP_NUM_THREADS=4 ./run -k life -a otca_off -s 2176 -ts 64 -v lazybtmpvec -m
-
 #define xgrain 2 
-
 unsigned life_compute_lazybtmpvec (unsigned nb_iter){ 
     
   unsigned x;
@@ -891,8 +823,7 @@ unsigned life_compute_lazybtmpvec (unsigned nb_iter){
 return itres;
 }
 
-//////////////////////////////// Tiled omp version
-// OMP_PLACES=cores OMP_NUM_THREADS=1 ./run -k life -a random -s 1024 -ts 128 -i 100 -n -v ompvec
+// OMP_PLACES=cores OMP_NUM_THREADS=4 ./run -k life -a random -s 1024 -ts 128 -i 100 -n -v ompvec
 unsigned life_compute_ompvec (unsigned nb_iter)
 {
   unsigned res = 0;
@@ -962,15 +893,12 @@ unsigned life_compute_bits(unsigned nb_iter)
   int change = 0;
   unsigned it = 1;
   for (; it <= nb_iter; it++) {
-
-    monitoring_start_tile (0);
-
-    for (int i = 0; i < DIM; i++)
+    
+    for (int i = 0; i < DIM; i++){
       for (int j = 0; j < DIM; j++)
         change |= compute_wordpix (i, j);
         
-    monitoring_end_tile (0, 0, DIM, DIM, 0);
-    
+    }
     swap_tables ();
     if (!change)
       return it;
@@ -978,6 +906,31 @@ unsigned life_compute_bits(unsigned nb_iter)
   return 0 ;
 }
 
+unsigned life_compute_bitbrdvec(unsigned nb_iter)
+{
+  printf("bitbrdvec\n");
+  unsigned x;
+  unsigned y;
+  unsigned who;
+  unsigned res;
+
+  unsigned it = 1;
+  for (; it <= nb_iter; it++) {
+    
+    for (int i = 0; i < NB_TILES_Y; i++){
+      for (int j = 0; j < NB_TILES_X; j+=(AVXBITS)){
+        x = j * TILE_W;
+        y = i * TILE_H;
+        who = omp_get_thread_num();
+        res = do_tile_bitbrdvec(x,y,AVXBITS,TILE_H,who);
+
+      }
+    }
+    swap_tables ();
+    
+  }
+  return 0 ;
+}
 
 static inline void swap_buffers(void)
 {
@@ -991,7 +944,7 @@ static inline void swap_buffers(void)
 unsigned life_invoke_ocl (unsigned nb_iter)
 {
   size_t global[2] = {DIM-2,DIM-2};
-  size_t local[2]  = {GPU_TILE_W,GPU_TILE_H};
+  //size_t local[2]  = {GPU_TILE_W,GPU_TILE_H};
   cl_int err;
 
   bool gpuChange = False;
@@ -1104,8 +1057,10 @@ void life_draw_guns (void);
 
 static inline void set_cell (int y, int x)
 {
-  if(ENABLE_BITCELL)
+  if(ENABLE_BITCELL==1)
     setcurBitCell(x,y,1);
+  else if(ENABLE_BITCELL==2)
+    setcurBitCellRow(x,y,1);
   else
     cur_table (y, x) = 1;
   if (opencl_used)
@@ -1115,8 +1070,10 @@ static inline void set_cell (int y, int x)
 
 static inline int get_cell (int y, int x)
 {
-  if(ENABLE_BITCELL)
+  if(ENABLE_BITCELL==1)
     return getBitCell(x,y);
+  if(ENABLE_BITCELL==2)
+    return getBitCellRow(x,y);
   return cur_table (y,x);
 }
 
