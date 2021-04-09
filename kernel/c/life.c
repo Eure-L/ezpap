@@ -49,7 +49,7 @@ static inline cell_t *table_cell_column (cell_t *restrict i, int y, int x)
 
 static inline cell_t *table_cell_row (cell_t *restrict i, int y, int x)
 { 
-  return i + (y+1) * (SIZEX) + (((x+1)/(VEC_SIZE)) + VEC_SIZE);
+  return i + (y+1) * (SIZEX) + (((x+1)/bits)+VEC_SIZE);
 }
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
@@ -372,10 +372,10 @@ void life_init_bitbrdvec(void)
     printf("init bitbrdvec\n");
   ENABLE_BITCELL = 2;
   bits = sizeof(cell_t)*8;
-  SIZEX =(DIM/VEC_SIZE+(2*(VEC_SIZE)));
+  SIZEX =(DIM/bits+(2*(VEC_SIZE)));
   SIZEY =(DIM)+2;
   if (_table == NULL) {
-    const unsigned size = _table_SIZE;
+    const unsigned size = _table_SIZE*2;
     PRINT_DEBUG ('u', "Memory footprint = 2 x %d bytes\n", size);
 
     _table = mmap (NULL, size, PROT_READ | PROT_WRITE,
@@ -765,6 +765,8 @@ static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
 
   __m256i change;
   __m256i res;
+  __m256i MSB = (_mm256_setzero_si256()|0x01)<<255;
+  __m256i LSB = _mm256_setzero_si256()|0x01;
 
   unsigned cnt = 0;
   
@@ -775,26 +777,29 @@ static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
   unsigned i = x;
   
 
-  for (i = x; i < x + width; i+= AVXBITS){
+  for (i = x; i < x + width; i+= (AVXBITS)){
     unsigned j = y;
     cnt = 0; //counts lines
+
+    
 
     vecTabMid[toplane] = _mm256_loadu_si256((void*)(&cur_table_row(j-1,i)));
     vecTabMid[midlane] = _mm256_loadu_si256((void*)(&cur_table_row(j,i)));
     vecTabMid[botlane] = _mm256_loadu_si256((void*)(&cur_table_row(j+1,i)));
+    printf("ok\n");
+    vecTabLeft[toplane] = (vecTabMid[toplane]<<1)|(0x01&getBitCellRow(i-1,j-1));
+    vecTabLeft[midlane] = (vecTabMid[midlane]<<1)|(0x01&getBitCellRow(i-1,j));
+    vecTabLeft[botlane] = (vecTabMid[botlane]<<1)|(0x01&getBitCellRow(i-1,j+1));
+    printf("ok\n");
 
-    vecTabLeft[toplane] = _mm256_loadu_si256((void*)(&cur_table_row(j-1,i)));
-    vecTabLeft[midlane] = _mm256_loadu_si256((void*)(&cur_table_row(j,-1)));
-    vecTabLeft[botlane] = _mm256_loadu_si256((void*)(&cur_table_row(j+1,i)));
-
-    vecTabRight[toplane] = _mm256_loadu_si256((void*)(&cur_table_row(j-1,i)+1));
-    vecTabRight[midlane] = _mm256_loadu_si256((void*)(&cur_table_row(j,i)+1));
-    vecTabRight[botlane] = _mm256_loadu_si256((void*)(&cur_table_row(j+1,i)+1));
+    vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((0x01&getBitCellRow(i+AVXBITS,j-1)<<(AVXBITS-1)));
+    vecTabRight[midlane] = (vecTabMid[midlane]>>1)|((0x01&getBitCellRow(i+AVXBITS,j)<<(AVXBITS-1)));
+    vecTabRight[botlane] = (vecTabMid[botlane]>>1)|((0x01&getBitCellRow(i+AVXBITS,j+1)<<(AVXBITS-1)));
 
 
   
     for (int j = y; j < y + height; j++){
-    
+      printf("x %d , y %d\n",i,j);
       XAB = _mm256_and_si256(vecTabLeft[toplane],vecTabMid[toplane]);
       a   = _mm256_xor_si256(vecTabLeft[toplane],vecTabMid[toplane]);
       XCD = _mm256_and_si256(vecTabRight[toplane],vecTabLeft[midlane]);
@@ -826,10 +831,12 @@ static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
       s2= _mm256_and_si256(X, _mm256_andnot_si256(a,a));
       s3 = _mm256_and_si256(X,a);
 
-      prntAVXi(vecTabLeft[midlane],"mid");
+      // prntAVXi(vecTabLeft[midlane],"left");
+      // prntAVXi(vecTabMid[midlane],"mid");
+      // prntAVXi(vecTabRight[midlane],"right");
 
-      // prntAVXi(s2,"s2");
-      // prntAVXi(s3,"s3");
+      prntAVXi(s2,"s2");
+      prntAVXi(s3,"s3");
 
       res = _mm256_or_si256(s3, _mm256_and_si256(vecTabMid[midlane],s2));
     
@@ -843,8 +850,8 @@ static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
       // Rolling the roles
 
       vecTabMid[toplane]  =_mm256_loadu_si256((void*)(&cur_table_row(j+2,i)));
-      vecTabRight[toplane]=_mm256_loadu_si256((void*)(&cur_table_row(j+2,i)+1))>>1;
-      vecTabLeft[toplane] =_mm256_loadu_si256((void*)(&cur_table_row(j+2,i)-1))<<1;
+      vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((0x01&getBitCellRow(i+AVXBITS,j-1)<<(AVXBITS-1)));
+      vecTabLeft[toplane] = (vecTabMid[toplane]<<1)|(0x01&getBitCellRow(i-1,j-1));
       cnt++;
 
     }
@@ -1017,9 +1024,9 @@ unsigned life_compute_bitbrdvec(unsigned nb_iter)
   unsigned it = 1;
   for (; it <= nb_iter; it++) {
     
-    #pragma omp parallel for schedule(dynamic)
+    //#pragma omp parallel for schedule(dynamic)
     for (int i = 0; i < NB_TILES_Y; i++){
-      for (int j = 0; j < NB_TILES_X; j+=(AVXBITS)){
+      for (int j = 0; j < NB_TILES_X; j+=(AVXBITS)/TILE_W){
         who=omp_get_thread_num();
         x = j * TILE_W;
         y = i * TILE_H;
