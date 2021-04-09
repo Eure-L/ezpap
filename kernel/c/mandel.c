@@ -322,7 +322,7 @@ static void compute_multiple_pixels (int i, int j)
 
 static void do_tile_vec (int x, int y, int width, int height,int who)
 {
-   //monitoring_start_tile (who);
+   monitoring_start_tile (who);
   for (int i = y; i < y + height; i++)
     for (int j = x; j < x + width; j += VEC_SIZE_FLOAT)
       compute_multiple_pixels (i, j);
@@ -330,7 +330,7 @@ static void do_tile_vec (int x, int y, int width, int height,int who)
        
 
 
-    //monitoring_end_tile (x, y, width, height, who);
+    monitoring_end_tile (x, y, width, height, who);
 }
 
 #endif
@@ -483,10 +483,20 @@ unsigned mandel_invoke_ocl_hybrid (unsigned nb_iter)
 }
 
 static int rank, size;
-// unsigned buf[(TILE_H+2)*TILE_W];
-// unsigned duplicata [size][(TILE_H+2)*TILE_W];
 
 void mandel_init_mpi ()
+{
+  easypap_check_mpi ();// check if MPI was correctly configured
+
+  /* récupérer son propre numéro */
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  /* récupérer le nombre de processus lancés */
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+  mandel_init ();
+}
+
+void mandel_init_mpi_omp ()
 {
   easypap_check_mpi ();// check if MPI was correctly configured
 
@@ -515,14 +525,40 @@ void mandel_refresh_img_mpi ()
 {
   // le maitre réceptionne les données
   // les autres processus envoient les données
-  // if(rank == 0){
-  //   for(int i=1;i<size;i++){
-  //     MPI_Recv(&cur_img(0,(i-1)*TILE_H),TILE_H*DIM,MPI_INT,i,0,MPI_COMM_WORLD,&status);
-  //   }
-  // }
-  // else{
-  //   MPI_Send(&cur_img(0,(rankTop(rank))),TILE_H*DIM,MPI_INT,1,0,MPI_COMM_WORLD);
-  // }
+  if(rank == 0){
+
+    for(int i=1;i<size;i++){
+      MPI_Recv(&cur_img(rankTop(i),0),rankSize(rank)  * DIM ,MPI_INT,i,0,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+    }
+  }
+
+  else{
+    MPI_Send(&cur_img(rankTop(rank),0),rankSize (rank)*DIM,MPI_INT,0,0,MPI_COMM_WORLD);
+  }
+}
+
+void mandel_refresh_img_mpi_omp ()
+{
+  // le maitre réceptionne les données
+  // les autres processus envoient les données
+  #if 0
+  if(rank == 0){
+
+    for(int i=1;i<size;i++){
+      MPI_Recv(&cur_img(rankTop(i),0),rankSize(rank)  * DIM ,MPI_INT,i,0,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+    }
+  }
+
+  else{
+    MPI_Send(&cur_img(rankTop(rank),0),rankSize (rank)*DIM,MPI_INT,0,0,MPI_COMM_WORLD);
+  }
+  #else 
+
+  MPI_Gather((rank== 0) ? MPI_IN_PLACE : &cur_img(rankTop (rank), 0), rankSize(rank) * DIM, MPI_INT,
+             &cur_img(0, 0),  rankSize(rank) * DIM, MPI_INT,
+             0,  MPI_COMM_WORLD);
+
+  #endif
 }
 
 ////////// MPI basic variant
@@ -534,7 +570,22 @@ unsigned mandel_compute_mpi (unsigned nb_iter)
 
   for(unsigned it = 1; it <= nb_iter; it++) {
     if(rank!=0)
-      do_tile (0, rankTop (rank), DIM, rankSize (rank), rank);
+      do_tile_vec (0, rankTop (rank), DIM, rankSize (rank), rank);
+    mandel_refresh_img_mpi();
+    zoom();
+  }
+  return 0;
+}
+
+unsigned mandel_compute_mpi_omp (unsigned nb_iter)
+{
+
+  for(unsigned it = 1; it <= nb_iter; it++) {
+    if(rank!=0){
+      #pragma omp parallel for num_threads(8) schedule(dynamic)
+      for(int l = rankTop(rank); l < rankTop(rank) + rankSize(rank); l++)
+        do_tile_vec (0, l, DIM,1, omp_get_thread_num());
+    }
     mandel_refresh_img_mpi();
     zoom();
   }

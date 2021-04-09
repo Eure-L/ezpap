@@ -752,7 +752,7 @@ static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
     }
   }
 
-  return change;
+  return 0;
 }
 
 
