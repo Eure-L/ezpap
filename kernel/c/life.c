@@ -201,7 +201,7 @@ void life_refresh_img_bits (void)
 
 void life_refresh_img_bitbrdvec (void)
 {
-  printf("refresh bitbrdvec\n");
+  //printf("refresh bitbrdvec\n");
   for (int i = 0; i < DIM; i++){
     for (int j = 0; j < DIM; j++){
         cur_img (i, j) = (getBitCellRow (j, i) )* color; 
@@ -743,12 +743,72 @@ static int do_tile_bitbrd (int x, int y, int width, int height, int who)
 
 static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
 {
+  unsigned  tileChange = 0;
+ 
+  __m256i vecTabLeft[3];
+  __m256i vecTabMid[3];
+  __m256i vecTabRight[3];
+  __m256i MtotVec;
+  __m256i LtotVec;
+  __m256i RtotVec;
 
+  __m256i b0;
+  __m256i b1;
+  __m256i b2;
 
+  __m256i s2;
+  __m256i s3;
 
-  for (int j = y; j < y + height; j++){
-    for (int i = x; i < x + width; i+= AVXBITS){
+  __m256i X;
+  __m256i XAB;
+  __m256i XEF;
+  __m256i XGH;
+
+  __m256i change;
+  __m256i nVec;
+
+  unsigned cnt = 0;
+  
+  #define toplane  ((cnt)%3)
+  #define midlane  ((cnt+1)%3)
+  #define botlane ((cnt+2)%3)
+  
+  unsigned i = x;
+  
+
+  for (i = x; i < x + width; i+= AVXBITS){
+    unsigned j = y;
+    cnt = 0; //counts lines
+
+    vecTabLeft[toplane] = _mm256_loadu_si256((void*)(&cur_table_row(j-1,i-1)));
+    vecTabLeft[midlane] = _mm256_loadu_si256((void*)(&cur_table_row(j,i-1)));
+    vecTabLeft[botlane] = _mm256_loadu_si256((void*)(&cur_table_row(j+1,i-1)));
+
+    vecTabRight[toplane] = _mm256_loadu_si256((void*)(&cur_table_row(j-1,i+1)));
+    vecTabRight[midlane] = _mm256_loadu_si256((void*)(&cur_table_row(j,i+1)));
+    vecTabRight[botlane] = _mm256_loadu_si256((void*)(&cur_table_row(j+1,i+1)));
+
+    vecTabMid[toplane] = _mm256_loadu_si256((void*)(&cur_table_row(j-1,i)));
+    vecTabMid[midlane] = _mm256_loadu_si256((void*)(&cur_table_row(j,i)));
+    vecTabMid[botlane] = _mm256_loadu_si256((void*)(&cur_table_row(j+1,i)));
+    
+    for (int j = y; j < y + height; j++){
+    
+      XAB = _mm256_and_si256(vecTabLeft[toplane],vecTabMid[toplane]);
       
+      
+      
+      
+      //  printf("\n----rollout----\n");
+      // printVecLanes(vecTabMid,toplane,midlane,botlane,"MIDDLE\n");
+      // printVecLanes(vecTabLeft,toplane,midlane,botlane,"LEFT\n");
+      // printVecLanes(vecTabRight,toplane,midlane,botlane,"RIGHT\n");
+      // Rolling the roles
+      vecTabRight[toplane]=_mm256_loadu_si256((void*)(&cur_table(j+2,i+1)));
+      vecTabLeft[toplane] =_mm256_loadu_si256((void*)(&cur_table(j+2,i-1)));
+      vecTabMid[toplane]  =_mm256_loadu_si256((void*)(&cur_table(j+2,i)));
+      cnt++;
+
     }
   }
 
@@ -908,7 +968,7 @@ unsigned life_compute_bits(unsigned nb_iter)
 
 unsigned life_compute_bitbrdvec(unsigned nb_iter)
 {
-  printf("bitbrdvec\n");
+  //printf("bitbrdvec\n");
   unsigned x;
   unsigned y;
   unsigned who;
