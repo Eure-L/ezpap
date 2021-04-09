@@ -9,7 +9,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-typedef int cell_t;
+typedef char cell_t;
 static unsigned color = 0xFFFF00FF; // Living cells have the yellow color
 
 static cell_t *restrict _table = NULL, *restrict _alternate_table = NULL;
@@ -22,13 +22,13 @@ bool one = !0;
 char threadChange[256];
 char threadBuffer[256];
 
-#define AVXBITS 256
-#define VEC_SIZE (AVXBITS/(sizeof(cell_t)*8))
+#define AVXBITS 256 // number of bits in a avx vector
+#define VEC_SIZE (AVXBITS/(sizeof(cell_t)*8)) // number of cellc in a avx vector
 
 
 #define NB_TILES_TOT (NB_TILES_X*NB_TILES_Y)
-#define NB_FAKE_X (NB_TILES_X + 2)
-#define NB_FAKE_Y (NB_TILES_Y + 2)
+#define NB_FAKE_X (NB_TILES_X + 2) // for lazy compute
+#define NB_FAKE_Y (NB_TILES_Y + 2) // for lazy compute
 #define NB_FAKE_TILES ((NB_FAKE_X)*(NB_FAKE_Y))
 #define curTable switcher
 #define nextTable !switcher
@@ -49,7 +49,7 @@ static inline cell_t *table_cell_column (cell_t *restrict i, int y, int x)
 
 static inline cell_t *table_cell_row (cell_t *restrict i, int y, int x)
 { 
-  return i + (y+1) * (SIZEX) + (((x)/AVXBITS) + VEC_SIZE);
+  return i + (y+1) * (SIZEX) + (((x+1)/(VEC_SIZE)) + VEC_SIZE);
 }
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
@@ -271,21 +271,7 @@ unsigned tilePosition(int i, int j){
           left * isTileOnLeft(i,j) + right * isTileOnRight(i,j);
 }
 
-void prntAVXi( __m256i vec,char * name){
-  int byteSize = sizeof(char);
-  const size_t n = sizeof(__m256i) / byteSize;
-  char buffer[n];
-  _mm256_storeu_si256((void*)buffer, vec);
-  int i = 0;
-  printf("%s : ",name);
-  for (; i < 32 ; i++){
-      //if(buffer[i]!=0)
-         
-      printf("%u.",buffer[i]);
-      
-  }
-  printf(" ~ i : %d\n",i);
-}
+
 
 static inline bool hasNeighbourChanged(unsigned i,unsigned j){
   //printf("isok\n");
@@ -503,6 +489,22 @@ static int do_tile_nocheck (int x, int y, int width, int height, int who)
   monitoring_end_tile (x, y, width, height, who);
 
   return r;
+}
+
+void prntAVXi( __m256i vec,char * name){
+  int byteSize = sizeof(char);
+  const size_t n = sizeof(__m256i) / byteSize;
+  char buffer[n];
+  _mm256_storeu_si256((void*)buffer, vec);
+  int i = 0;
+  printf("%s : ",name);
+  for (; i < 32 ; i++){
+      //if(buffer[i]!=0)
+      printB(buffer[i]);   
+      //printf("%d",buffer[i]);
+      
+  }
+  printf(" ~ i : %d\n",i);
 }
 
 void printVecLanes(__m256i * vecLst, int topL, int midL, int botL,char * str){
@@ -777,21 +779,20 @@ static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
     unsigned j = y;
     cnt = 0; //counts lines
 
-    vecTabLeft[toplane] = _mm256_loadu_si256((void*)(&cur_table_row(j-1,i-1)));
-
-    vecTabLeft[midlane] = _mm256_loadu_si256((void*)(&cur_table_row(j,i-1)));
-    vecTabLeft[botlane] = _mm256_loadu_si256((void*)(&cur_table_row(j+1,i-1)));
-
-    vecTabRight[toplane] = _mm256_loadu_si256((void*)(&cur_table_row(j-1,i+1)));
-    vecTabRight[midlane] = _mm256_loadu_si256((void*)(&cur_table_row(j,i+1)));
-    vecTabRight[botlane] = _mm256_loadu_si256((void*)(&cur_table_row(j+1,i+1)));
-
     vecTabMid[toplane] = _mm256_loadu_si256((void*)(&cur_table_row(j-1,i)));
     vecTabMid[midlane] = _mm256_loadu_si256((void*)(&cur_table_row(j,i)));
     vecTabMid[botlane] = _mm256_loadu_si256((void*)(&cur_table_row(j+1,i)));
-    
+
+    vecTabLeft[toplane] = _mm256_loadu_si256((void*)(&cur_table_row(j-1,i)));
+    vecTabLeft[midlane] = _mm256_loadu_si256((void*)(&cur_table_row(j,-1)));
+    vecTabLeft[botlane] = _mm256_loadu_si256((void*)(&cur_table_row(j+1,i)));
+
+    vecTabRight[toplane] = _mm256_loadu_si256((void*)(&cur_table_row(j-1,i)+1));
+    vecTabRight[midlane] = _mm256_loadu_si256((void*)(&cur_table_row(j,i)+1));
+    vecTabRight[botlane] = _mm256_loadu_si256((void*)(&cur_table_row(j+1,i)+1));
 
 
+  
     for (int j = y; j < y + height; j++){
     
       XAB = _mm256_and_si256(vecTabLeft[toplane],vecTabMid[toplane]);
@@ -808,34 +809,42 @@ static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
       c = _mm256_and_si256(XAB,XCD);
       b = _mm256_xor_si256(_mm256_xor_si256(XAB,XCD),d);
 
-      h = _mm256_and_si256( vecTabRight[midlane],vecTabLeft[botlane]);
-      e = _mm256_xor_si256(vecTabRight[midlane],vecTabLeft[botlane]);
+      h = _mm256_and_si256( vecTabRight[midlane],vecTabMid[botlane]);
+      e = _mm256_xor_si256(vecTabRight[midlane],vecTabMid[botlane]);
       g = _mm256_and_si256(XEF,XGH);
       f =  _mm256_xor_si256(_mm256_xor_si256(XEF,XGH),h);
 
       d = _mm256_and_si256(a,e);
       a = _mm256_xor_si256(a,e);
       h = _mm256_and_si256(b,f);
+      b = _mm256_xor_si256(b,f);
       h = _mm256_or_si256(h, _mm256_and_si256(b,d));
       b = _mm256_xor_si256(b,d);
       c = _mm256_xor_si256(c ,_mm256_xor_si256(g,h));
 
-      X = _mm256_andnot_si256(c,d);
+      X = _mm256_and_si256( _mm256_andnot_si256(c,c) , b);
       s2= _mm256_and_si256(X, _mm256_andnot_si256(a,a));
       s3 = _mm256_and_si256(X,a);
 
-      res = _mm256_or_si256(s3, _mm256_and_si256(vecTabMid[midlane],s2));
+      prntAVXi(vecTabLeft[midlane],"mid");
 
-      _mm256_storeu_si256((void*)(&next_table_row(j,i)),vecTabMid[midlane]);
+      // prntAVXi(s2,"s2");
+      // prntAVXi(s3,"s3");
+
+      res = _mm256_or_si256(s3, _mm256_and_si256(vecTabMid[midlane],s2));
+    
+      //_mm256_storeu_si256((void*)(&next_table_row(j,i)),vecTabMid[midlane]);
+      _mm256_storeu_si256((void*)(&next_table_row(j,i)),res);
 
       //  printf("\n----rollout----\n");
       // printVecLanes(vecTabMid,toplane,midlane,botlane,"MIDDLE\n");
       // printVecLanes(vecTabLeft,toplane,midlane,botlane,"LEFT\n");
       // printVecLanes(vecTabRight,toplane,midlane,botlane,"RIGHT\n");
       // Rolling the roles
-      vecTabRight[toplane]=_mm256_loadu_si256((void*)(&cur_table_row(j+2,i+1)));
-      vecTabLeft[toplane] =_mm256_loadu_si256((void*)(&cur_table_row(j+2,i-1)));
+
       vecTabMid[toplane]  =_mm256_loadu_si256((void*)(&cur_table_row(j+2,i)));
+      vecTabRight[toplane]=_mm256_loadu_si256((void*)(&cur_table_row(j+2,i)+1))>>1;
+      vecTabLeft[toplane] =_mm256_loadu_si256((void*)(&cur_table_row(j+2,i)-1))<<1;
       cnt++;
 
     }
@@ -850,7 +859,9 @@ static int do_tile_bitbrdvec (int x, int y, int width, int height, int who)
   int r;
 
   monitoring_start_tile (who);
+
   r = do_tile_reg_bitbrdvec (x, y, width, height);
+
   monitoring_end_tile (x, y, width, height, who);
 
   return r;
@@ -1006,8 +1017,10 @@ unsigned life_compute_bitbrdvec(unsigned nb_iter)
   unsigned it = 1;
   for (; it <= nb_iter; it++) {
     
+    #pragma omp parallel for schedule(dynamic)
     for (int i = 0; i < NB_TILES_Y; i++){
       for (int j = 0; j < NB_TILES_X; j+=(AVXBITS)){
+        who=omp_get_thread_num();
         x = j * TILE_W;
         y = i * TILE_H;
         who = omp_get_thread_num();
@@ -1017,6 +1030,7 @@ unsigned life_compute_bitbrdvec(unsigned nb_iter)
     }
     swap_tables ();
   }
+  return 0;
 }
 
 static inline void swap_buffers(void)
