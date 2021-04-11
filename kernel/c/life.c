@@ -144,11 +144,11 @@ static inline void setnextBitCellRow(int i, int j, unsigned val){
 }
 
 //
-static inline cell_t getBitCell(int i, int j){
+static inline unsigned getBitCell(int i, int j){
   return (cur_table_bits(j,i)>>((j)%bits)&(0x01));
 }
 
-static inline cell_t getBitCellRow(int i, int j){
+static inline unsigned getBitCellRow(int i, int j){
   return (cur_table_row(j,i)>>((i)%bits)&(0x01));
 }
 
@@ -755,6 +755,8 @@ static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
   __m256i s2;
   __m256i s3;
 
+  __m256i b0,b1,b2,b3;
+
   __m256i a,b,c,d,e,f,g,h;
 
   __m256i X;
@@ -765,8 +767,6 @@ static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
 
   __m256i change;
   __m256i res;
-  __m256i MSB = (_mm256_setzero_si256()|0x01)<<255;
-  __m256i LSB = _mm256_setzero_si256()|0x01;
 
   unsigned cnt = 0;
   
@@ -786,59 +786,83 @@ static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
     vecTabMid[toplane] = _mm256_loadu_si256((void*)(&cur_table_row(j-1,i)));
     vecTabMid[midlane] = _mm256_loadu_si256((void*)(&cur_table_row(j,i)));
     vecTabMid[botlane] = _mm256_loadu_si256((void*)(&cur_table_row(j+1,i)));
-    printf("ok\n");
+    
+    // to get the vectors on the left side, middle vectors are shifted to the
+    // right and we add the last bit that was out of scope
     vecTabLeft[toplane] = (vecTabMid[toplane]<<1)|(0x01&getBitCellRow(i-1,j-1));
     vecTabLeft[midlane] = (vecTabMid[midlane]<<1)|(0x01&getBitCellRow(i-1,j));
     vecTabLeft[botlane] = (vecTabMid[botlane]<<1)|(0x01&getBitCellRow(i-1,j+1));
-    printf("ok\n");
 
+    // to get the vectors on the right side, middle vectors are shifted to the
+    // left and we add the last bit that was out of scope
     vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((0x01&getBitCellRow(i+AVXBITS,j-1)<<(AVXBITS-1)));
     vecTabRight[midlane] = (vecTabMid[midlane]>>1)|((0x01&getBitCellRow(i+AVXBITS,j)<<(AVXBITS-1)));
     vecTabRight[botlane] = (vecTabMid[botlane]>>1)|((0x01&getBitCellRow(i+AVXBITS,j+1)<<(AVXBITS-1)));
+    
+    // prntAVXi(vecTabMid[midlane],"mid");
+    // prntAVXi(vecTabLeft[midlane],"left");
+    // prntAVXi(vecTabRight[midlane],"right");
 
-
-  
     for (int j = y; j < y + height; j++){
-      printf("x %d , y %d\n",i,j);
-      XAB = _mm256_and_si256(vecTabLeft[toplane],vecTabMid[toplane]);
-      a   = _mm256_xor_si256(vecTabLeft[toplane],vecTabMid[toplane]);
-      XCD = _mm256_and_si256(vecTabRight[toplane],vecTabLeft[midlane]);
-      c   = _mm256_xor_si256(vecTabRight[toplane],vecTabLeft[midlane]);
-      XEF = _mm256_and_si256(vecTabRight[midlane],vecTabLeft[botlane]);
-      e   = _mm256_xor_si256(vecTabRight[midlane],vecTabLeft[botlane]);
-      XGH = _mm256_and_si256(vecTabMid[botlane],vecTabRight[botlane]);
-      g   = _mm256_xor_si256(vecTabMid[botlane],vecTabRight[botlane]);
+      //printf("x %d , y %d\n",i,j);
+      a = vecTabLeft[toplane];
+      b = vecTabMid[toplane];
+      c = vecTabRight[toplane];
+      d = vecTabLeft[midlane];
+      e = vecTabRight[midlane];
+      f = vecTabLeft[botlane];
+      g = vecTabMid[botlane];
+      h = vecTabLeft[botlane];
 
-      d = _mm256_and_si256( a, c);
-      a = _mm256_xor_si256(a,c);
-      c = _mm256_and_si256(XAB,XCD);
-      b = _mm256_xor_si256(_mm256_xor_si256(XAB,XCD),d);
+      b0 = _mm256_xor_si256(a,b);
+      b1 = _mm256_and_si256(a,b);
+      //b2 = zero;
+      X = _mm256_and_si256(b0,c); //carry
 
-      h = _mm256_and_si256( vecTabRight[midlane],vecTabMid[botlane]);
-      e = _mm256_xor_si256(vecTabRight[midlane],vecTabMid[botlane]);
-      g = _mm256_and_si256(XEF,XGH);
-      f =  _mm256_xor_si256(_mm256_xor_si256(XEF,XGH),h);
+      b0 = _mm256_xor_si256(b0,c);
+      b2 = _mm256_xor_si256(b2,_mm256_and_si256(b1,X));
+      b1 = _mm256_xor_si256(b1,X);// add c
 
-      d = _mm256_and_si256(a,e);
-      a = _mm256_xor_si256(a,e);
-      h = _mm256_and_si256(b,f);
-      b = _mm256_xor_si256(b,f);
-      h = _mm256_or_si256(h, _mm256_and_si256(b,d));
-      b = _mm256_xor_si256(b,d);
-      c = _mm256_xor_si256(c ,_mm256_xor_si256(g,h));
+      X = _mm256_and_si256(b0,d);
+      b0 = _mm256_xor_si256(b0,d);
+      b2 = _mm256_xor_si256(b2,_mm256_and_si256(b1,X));
+      b1 = _mm256_xor_si256(b1,X);// add d
 
-      X = _mm256_and_si256( _mm256_andnot_si256(c,c) , b);
-      s2= _mm256_and_si256(X, _mm256_andnot_si256(a,a));
-      s3 = _mm256_and_si256(X,a);
+      X = _mm256_and_si256(b0,e);
+      b0 = _mm256_xor_si256(b0,e);
+      b2 = _mm256_xor_si256(b2,_mm256_and_si256(b1,X));
+      b1 = _mm256_xor_si256(b1,X);// add e
 
-      // prntAVXi(vecTabLeft[midlane],"left");
-      // prntAVXi(vecTabMid[midlane],"mid");
-      // prntAVXi(vecTabRight[midlane],"right");
+      X = _mm256_and_si256(b0,f);
+      b0 = _mm256_xor_si256(b0,f);
+      b2 = _mm256_xor_si256(b2,_mm256_and_si256(b1,X));
+      b1 = _mm256_xor_si256(b1,X);// add f
+
+      X = _mm256_and_si256(b0,g);
+      b0 = _mm256_xor_si256(b0,g);
+      b2 = _mm256_xor_si256(b2,_mm256_and_si256(b1,X));
+      b1 = _mm256_xor_si256(b1,X);// add g
+
+      X = _mm256_and_si256(b0,h);
+      b0 = _mm256_xor_si256(b0,h);
+      b2 = _mm256_xor_si256(b2,_mm256_and_si256(b1,X));
+      b1 = _mm256_xor_si256(b1,X);// add h
+
+      X = _mm256_and_si256( ~b2 , b1);
+      s2 = _mm256_and_si256(X,~b0);
+      s3 = _mm256_and_si256(X,b0);
+
+      // s2= _mm256_and_si256(X, ~b0);
+      // s3 = _mm256_and_si256(X,b0);
+
+      //  prntAVXi(vecTabLeft[midlane],"left");
+      //  prntAVXi(vecTabMid[midlane],"mid");
+      //  prntAVXi(vecTabRight[midlane],"right");
 
       prntAVXi(s2,"s2");
       prntAVXi(s3,"s3");
 
-      res = _mm256_or_si256(s3, _mm256_and_si256(vecTabMid[midlane],s2));
+      res = _mm256_or_si256(s2, _mm256_and_si256(vecTabMid[midlane],s2));
     
       //_mm256_storeu_si256((void*)(&next_table_row(j,i)),vecTabMid[midlane]);
       _mm256_storeu_si256((void*)(&next_table_row(j,i)),res);
