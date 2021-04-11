@@ -9,7 +9,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-typedef char cell_t;
+typedef unsigned cell_t;
 static unsigned color = 0xFFFF00FF; // Living cells have the yellow color
 
 static cell_t *restrict _table = NULL, *restrict _alternate_table = NULL;
@@ -777,11 +777,9 @@ static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
   unsigned i = x;
   
 
-  for (i = x; i < x + width; i+= (AVXBITS)){
+  for (i = x; i < x + width; i+= (AVXBITS-2)){
     unsigned j = y;
     cnt = 0; //counts lines
-
-    
 
     vecTabMid[toplane] = _mm256_loadu_si256((void*)(&cur_table_row(j-1,i)));
     vecTabMid[midlane] = _mm256_loadu_si256((void*)(&cur_table_row(j,i)));
@@ -812,59 +810,52 @@ static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
       e = vecTabRight[midlane];
       f = vecTabLeft[botlane];
       g = vecTabMid[botlane];
-      h = vecTabLeft[botlane];
+      h = vecTabRight[botlane];
 
-      b0 = _mm256_xor_si256(a,b);
-      b1 = _mm256_and_si256(a,b);
-      //b2 = zero;
-      X = _mm256_and_si256(b0,c); //carry
+      XAB = _mm256_and_si256(a,b);
+      a   = _mm256_xor_si256(a,b);
+      XCD = _mm256_and_si256(c,d);
+      c   = _mm256_xor_si256(c,d);
+      XEF = _mm256_and_si256(e,f);
+      e   = _mm256_xor_si256(e,f);
+      XGH = _mm256_and_si256(g,h);
+      g   = _mm256_xor_si256(g,h);
 
-      b0 = _mm256_xor_si256(b0,c);
-      b2 = _mm256_xor_si256(b2,_mm256_and_si256(b1,X));
-      b1 = _mm256_xor_si256(b1,X);// add c
+      d = _mm256_and_si256( a, c);
+      a = _mm256_xor_si256(a,c);
+      c = _mm256_and_si256(XAB,XCD);
+      b = _mm256_xor_si256(XAB,_mm256_xor_si256(XCD,d));
 
-      X = _mm256_and_si256(b0,d);
-      b0 = _mm256_xor_si256(b0,d);
-      b2 = _mm256_xor_si256(b2,_mm256_and_si256(b1,X));
-      b1 = _mm256_xor_si256(b1,X);// add d
+      h = _mm256_and_si256( e,g);
+      e = _mm256_xor_si256(e,g);
+      g = _mm256_and_si256(XEF,XGH);
+      f =  _mm256_xor_si256(XEF,_mm256_xor_si256(XGH,h));
 
-      X = _mm256_and_si256(b0,e);
-      b0 = _mm256_xor_si256(b0,e);
-      b2 = _mm256_xor_si256(b2,_mm256_and_si256(b1,X));
-      b1 = _mm256_xor_si256(b1,X);// add e
+      d = _mm256_and_si256(a,e);
+      a = _mm256_xor_si256(a,e);
+      h = _mm256_and_si256(b,f);
+      b = _mm256_xor_si256(b,f);
+      h = _mm256_or_si256(h, _mm256_and_si256(b,d));
+      b = _mm256_xor_si256(b,d);
+      c = _mm256_xor_si256(c ,_mm256_xor_si256(g,h));
 
-      X = _mm256_and_si256(b0,f);
-      b0 = _mm256_xor_si256(b0,f);
-      b2 = _mm256_xor_si256(b2,_mm256_and_si256(b1,X));
-      b1 = _mm256_xor_si256(b1,X);// add f
+      X = _mm256_and_si256( ~c , b);
 
-      X = _mm256_and_si256(b0,g);
-      b0 = _mm256_xor_si256(b0,g);
-      b2 = _mm256_xor_si256(b2,_mm256_and_si256(b1,X));
-      b1 = _mm256_xor_si256(b1,X);// add g
-
-      X = _mm256_and_si256(b0,h);
-      b0 = _mm256_xor_si256(b0,h);
-      b2 = _mm256_xor_si256(b2,_mm256_and_si256(b1,X));
-      b1 = _mm256_xor_si256(b1,X);// add h
-
-      X = _mm256_and_si256( ~b2 , b1);
-      s2 = _mm256_and_si256(X,~b0);
-      s3 = _mm256_and_si256(X,b0);
+      s2= _mm256_and_si256(X, ~a);
+      s3 = _mm256_and_si256(X,a);
 
       // s2= _mm256_and_si256(X, ~b0);
       // s3 = _mm256_and_si256(X,b0);
 
       //  prntAVXi(vecTabLeft[midlane],"left");
-      //  prntAVXi(vecTabMid[midlane],"mid");
+      //prntAVXi(vecTabMid[toplane],"mid");
       //  prntAVXi(vecTabRight[midlane],"right");
 
-      prntAVXi(s2,"s2");
-      prntAVXi(s3,"s3");
+      //prntAVXi(s2,"s2");
+      //prntAVXi(s3,"s3");
 
-      res = _mm256_or_si256(s2, _mm256_and_si256(vecTabMid[midlane],s2));
+      res = _mm256_or_si256(s3, _mm256_and_si256(vecTabMid[midlane],s2));
     
-      //_mm256_storeu_si256((void*)(&next_table_row(j,i)),vecTabMid[midlane]);
       _mm256_storeu_si256((void*)(&next_table_row(j,i)),res);
 
       //  printf("\n----rollout----\n");
@@ -874,8 +865,8 @@ static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
       // Rolling the roles
 
       vecTabMid[toplane]  =_mm256_loadu_si256((void*)(&cur_table_row(j+2,i)));
-      vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((0x01&getBitCellRow(i+AVXBITS,j-1)<<(AVXBITS-1)));
-      vecTabLeft[toplane] = (vecTabMid[toplane]<<1)|(0x01&getBitCellRow(i-1,j-1));
+      vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((0x01&getBitCellRow(i+AVXBITS,j+2)<<(AVXBITS-1)));
+      vecTabLeft[toplane] = (vecTabMid[toplane]<<1)|(0x01&getBitCellRow(i-1,j+2));
       cnt++;
 
     }
