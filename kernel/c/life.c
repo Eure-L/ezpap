@@ -18,6 +18,8 @@ char * bitMapTls; // Two Bit maps represented in a vector
 bool switcher = 1;
 __m256i mask1;
 __m256i zero;
+__m128i zero128;
+
 bool one = !0;
 char threadChange[256];
 char threadBuffer[256];
@@ -387,6 +389,7 @@ void life_init_bitbrdvec(void)
   if(bitMapTls==NULL)
     bitMapTls = initBtmptls(); 
   zero = _mm256_setzero_si256(); 
+  zero128 = _mm_setzero_si128();
   mask1 = _mm256_set1_epi8(1);
   clear_table(_table);
 }
@@ -515,11 +518,12 @@ void prntSSE( __m128i vec,char * name){
   printf("%s : ",name);
   for (; i < 16 ; i++){
       //if(buffer[i]!=0)
-      printB(buffer[i]);   
+      printB(buffer[i]);
+      printf("_(%d) ",i);   
       //printf("%d",buffer[i]);
       
   }
-  printf(" ~ i : %d\n",i);
+  printf(" ~ i : %d\n\n",i);
 }
 
 void printVecLanes(__m256i * vecLst, int topL, int midL, int botL,char * str){
@@ -787,7 +791,7 @@ static int do_tile_reg_bitbrdAVX2(int x, int y, int width, int height)
   unsigned i = x;
   
 
-  for (i = x; i < x + width; i+= 128){
+  for (i = x; i < x + width; i+= 256){
     unsigned j = y;
     cnt = 0; //counts lines
 
@@ -799,9 +803,9 @@ static int do_tile_reg_bitbrdAVX2(int x, int y, int width, int height)
     vecTabLeft[midlane] = (vecTabMid[midlane]<<1)|(getBitCellRow(i-1,j));
     vecTabLeft[botlane] = (vecTabMid[botlane]<<1)|(getBitCellRow(i-1,j+1));
 
-    vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((getBitCellRow(i+bits,j-1)<<(bits-1)));
-    vecTabRight[midlane] = (vecTabMid[midlane]>>1)|((getBitCellRow(i+bits,j)<<(bits-1)));
-    vecTabRight[botlane] = (vecTabMid[botlane]>>1)|((getBitCellRow(i+bits,j+1)<<(bits-1)));
+    vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((getBitCellRow(i+bits,j-1)<<(255)));
+    vecTabRight[midlane] = (vecTabMid[midlane]>>1)|((getBitCellRow(i+bits,j)<<(255)));
+    vecTabRight[botlane] = (vecTabMid[botlane]>>1)|((getBitCellRow(i+bits,j+1)<<(255)));
     
     
     for (int j = y; j < y + height; j++){
@@ -855,7 +859,7 @@ static int do_tile_reg_bitbrdAVX2(int x, int y, int width, int height)
 
       vecTabMid[toplane]   = _mm256_loadu_si256((void*)(&cur_table_row(j+2,i)));
       vecTabLeft[toplane] = (vecTabMid[toplane]<<1)|(getBitCellRow(i-1,j+2));
-      vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((getBitCellRow(i+bits,j+2)<<(bits-1)));
+      vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((getBitCellRow(i+bits,j+2)<<(255)));
       // vecTabLeft[toplane] =  _mm_or_si128( _mm_slli_si128(vecTabMid[toplane],1),
       //                                           _mm_setr_epi32(getBitCellRow(i-1,j+2),0,0,0));
       // vecTabRight[toplane] = _mm_or_si128( _mm_srli_si128(vecTabMid[toplane],1),   
@@ -905,29 +909,37 @@ static int do_tile_reg_bitbrdSSE(int x, int y, int width, int height)
     
     // to get the vectors on the left side, middle vectors are shifted to the
     // right and we add the last bit that was out of scope
-    // vecTabLeft[toplane] =  _mm_or_si128( _mm_slli_si128(vecTabMid[toplane],1),
-    //                                             _mm_setr_epi32(getBitCellRow(i-1,j-1),0,0,0));
-    // vecTabLeft[midlane] = _mm_or_si128( _mm_slli_si128(vecTabMid[midlane],1),
-    //                                             _mm_setr_epi32(getBitCellRow(i-1,j),0,0,0));
-    // vecTabLeft[botlane] = _mm_or_si128( _mm_slli_si128(vecTabMid[botlane],1),
-    //                                             _mm_setr_epi32(getBitCellRow(i-1,j+1),0,0,0));
+    vecTabLeft[toplane] =   _mm_or_si128( _mm_slli_si128(vecTabMid[toplane],1),
+                                                _mm_setr_epi32(getBitCellRow(i-1,j-1)&0x01,0,0,0));
+    vecTabLeft[midlane] =   _mm_or_si128( _mm_slli_si128(vecTabMid[midlane],1),
+                                                _mm_setr_epi32(getBitCellRow(i-1,j)&0x01,0,0,0));
+    vecTabLeft[botlane] =   _mm_or_si128( _mm_slli_si128(vecTabMid[botlane],1),
+                                                _mm_setr_epi32(getBitCellRow(i-1,j+1)&0x01,0,0,0));
 
     // to get the vectors on the right side, middle vectors are shifted to the
     // left and we add the last bit that was out of scope
-    // vecTabRight[toplane] = _mm_or_si128( _mm_srli_si128(vecTabMid[toplane],1),   
-    //                                       _mm_setr_epi32(0,0,0,getBitCellRow(i+bits,j-1)<<(31)));
-    // vecTabRight[midlane] = _mm_or_si128( _mm_srli_si128(vecTabMid[midlane],1),   
-    //                                       _mm_setr_epi32(0,0,0,getBitCellRow(i+bits,j)<<(31)));
-    // vecTabRight[botlane] =_mm_or_si128( _mm_srli_si128(vecTabMid[botlane],1),   
-    //                                       _mm_setr_epi32(0,0,0,getBitCellRow(i+bits,j+1)<<(31)));
+    vecTabRight[toplane] = _mm_or_si128( _mm_srli_si128(vecTabMid[toplane],1),   
+                                          _mm_setr_epi32(0,0,0,getBitCellRow(i+bits,j-1)*0x80000000));
+    vecTabRight[midlane] = _mm_or_si128( _mm_srli_si128(vecTabMid[midlane],1),   
+                                          _mm_setr_epi32(0,0,0,getBitCellRow(i+bits,j)*0x80000000));
+    vecTabRight[botlane] =_mm_or_si128( _mm_srli_si128(vecTabMid[botlane],1),   
+                                          _mm_setr_epi32(0,0,0,getBitCellRow(i+bits,j+1)*0x80000000));
 
-    vecTabLeft[toplane] = (vecTabMid[toplane]<<1)|(getBitCellRow(i-1,j-1));
-    vecTabLeft[midlane] = (vecTabMid[midlane]<<1)|(getBitCellRow(i-1,j));
-    vecTabLeft[botlane] = (vecTabMid[botlane]<<1)|(getBitCellRow(i-1,j+1));
+    // vecTabLeft[toplane] = (vecTabMid[toplane]<<1)|(getBitCellRow(i-1,j-1));
+    // vecTabLeft[midlane] = (vecTabMid[midlane]<<1)|(getBitCellRow(i-1,j));
+    // vecTabLeft[botlane] = (vecTabMid[botlane]<<1)|(getBitCellRow(i-1,j+1));
 
-    vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((getBitCellRow(i+bits,j-1)<<(bits-1)));
-    vecTabRight[midlane] = (vecTabMid[midlane]>>1)|((getBitCellRow(i+bits,j)<<(bits-1)));
-    vecTabRight[botlane] = (vecTabMid[botlane]>>1)|((getBitCellRow(i+bits,j+1)<<(bits-1)));
+    // vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((getBitCellRow(i+bits,j-1)<<(bits-1)));
+    // vecTabRight[midlane] = (vecTabMid[midlane]>>1)|((getBitCellRow(i+bits,j)<<(bits-1)));
+    // vecTabRight[botlane] = (vecTabMid[botlane]>>1)|((getBitCellRow(i+bits,j+1)<<(bits-1)));
+
+    // vecTabLeft[toplane] = _mm_loadu_si128((void*)(&cur_table_row(j-1,i-1)));
+    // vecTabLeft[midlane] = _mm_loadu_si128((void*)(&cur_table_row(j-1,i-1)));
+    // vecTabLeft[botlane] = _mm_loadu_si128((void*)(&cur_table_row(j-1,i-1)));
+
+    // vecTabRight[toplane] = _mm_loadu_si128((void*)(&cur_table_row(j-1,i)));
+    // vecTabRight[midlane] = _mm_loadu_si128((void*)(&cur_table_row(j-1,i)));
+    // vecTabRight[botlane] = _mm_loadu_si128((void*)(&cur_table_row(j-1,i)));
     
     
     for (int j = y; j < y + height; j++){
@@ -980,13 +992,16 @@ static int do_tile_reg_bitbrdSSE(int x, int y, int width, int height)
       _mm_storeu_si128((void*)(&next_table_row(j,i)),res);
 
       vecTabMid[toplane]   = _mm_loadu_si128((void*)(&cur_table_row(j+2,i)));
-      vecTabLeft[toplane] = (vecTabMid[toplane]<<1)|(getBitCellRow(i-1,j+2));
-      vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((getBitCellRow(i+bits,j+2)<<(bits-1)));
-      // vecTabLeft[toplane] =  _mm_or_si128( _mm_slli_si128(vecTabMid[toplane],1),
-      //                                           _mm_setr_epi32(getBitCellRow(i-1,j+2),0,0,0));
-      // vecTabRight[toplane] = _mm_or_si128( _mm_srli_si128(vecTabMid[toplane],1),   
-      //                                     _mm_setr_epi32(0,0,0,getBitCellRow(i+bits,j+2)<<(31)));//|((0x01&getBitCellRow(i+bits,j+2)<<(bits-1)));
+      // vecTabLeft[toplane] = (vecTabMid[toplane]<<1)|(getBitCellRow(i-1,j+2));
+      // vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((getBitCellRow(i+bits,j+2)<<(bits-1)));
+      vecTabLeft[toplane] =  _mm_or_si128( _mm_slli_si128(vecTabMid[toplane],1),
+                                                _mm_setr_epi32(getBitCellRow(i-1,j+2)<<(31),0,0,0));
+      vecTabRight[toplane] = _mm_or_si128( _mm_srli_si128(vecTabMid[toplane],1),   
+                                          _mm_setr_epi32(0,0,0,getBitCellRow(i+bits,j+2)));//|((0x01&getBitCellRow(i+bits,j+2)<<(bits-1)));
       
+      // vecTabRight[toplane] = _mm_or_si128( vecTabMid[toplane]>>1 , zero128);//_mm_setr_epi32(0,0,0,getBitCellRow(i+bits,j+2)<<(31)));
+      // vecTabLeft[botlane] = _mm_or_si128( vecTabMid[toplane]<<1 , zero128);// _mm_setr_epi32(getBitCellRow(i-1,j+2),0,0,0));
+
       cnt++;
     }
   }
