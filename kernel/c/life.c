@@ -9,7 +9,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-typedef unsigned cell_t;
+typedef char cell_t;
 static unsigned color = 0xFFFF00FF; // Living cells have the yellow color
 
 static cell_t *restrict _table = NULL, *restrict _alternate_table = NULL;
@@ -858,9 +858,7 @@ static int do_tile_reg_bitbrdSSE(int x, int y, int width, int height)
 }
 
 static int do_tile_reg_bitbrd(int x, int y, int width, int height)
-{
-  unsigned  tileChange = 0;
- 
+{ 
   cell_t vecTabLeft[3];
   cell_t vecTabMid[3];
   cell_t vecTabRight[3];
@@ -951,7 +949,7 @@ static int do_tile_reg_bitbrd(int x, int y, int width, int height)
       cnt++;
     }
   }
-  return change;
+  return change!=0;
 }
 
 static int do_tile_bitbrdvec (int x, int y, int width, int height, int who)
@@ -1076,9 +1074,9 @@ unsigned life_compute_seq (unsigned nb_iter)
 
     monitoring_start_tile (0);
 
-    for (int i = 1; i < DIM-1; i++)
-      for (int j = 1; j < DIM-1; j++)
-        change |= compute_new_state_nocheck (i, j);
+    for (int i = 0; i < DIM; i++)
+      for (int j = 0; j < DIM; j++)
+        change |= compute_new_state (i, j);
 
     monitoring_end_tile (0, 0, DIM, DIM, 0);
     swap_tables ();
@@ -1112,26 +1110,21 @@ unsigned life_compute_bitbrdvec(unsigned nb_iter)
   unsigned x;
   unsigned y;
   unsigned who;
-  cell_t change ;
 
   unsigned it = 1;
   for (; it <= nb_iter; it++) {
-    //#pragma omp parallel for schedule(dynamic)
+    #pragma omp parallel for schedule(dynamic)
     for (int i = 0; i < NB_TILES_Y; i++){
       for (int j = 0; j < NB_TILES_X; j++){
         who =omp_get_thread_num();
         x = j * TILE_W;
         y = i * TILE_H;
         who = omp_get_thread_num();
-        change |= do_tile_bitbrdvec(x,y,TILE_W,TILE_H,who);
-
+        do_tile_bitbrdvec(x,y,TILE_W,TILE_H,who);
       }
     }
     swap_tables ();
-    if(!change){
-      return it;
-    }
-    change = 0;
+    
   }
   return 0;
 }
