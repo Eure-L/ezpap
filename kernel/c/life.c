@@ -744,7 +744,7 @@ static int do_tile_bitbrd (int x, int y, int width, int height, int who)
   return r;
 }
 
-static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
+static int do_tile_reg_bitbrdvec2(int x, int y, int width, int height)
 {
   unsigned  tileChange = 0;
  
@@ -753,14 +753,13 @@ static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
   __m256i vecTabRight[3];
   __m256i s2;
   __m256i s3;
-  __m256i b0,b1,b2,b3;
   __m256i a,b,c,d,e,f,g,h;
   __m256i X;
   __m256i XAB;
   __m256i XCD;
   __m256i XEF;
   __m256i XGH;
-
+  
   __m256i change;
   __m256i res;
 
@@ -773,7 +772,8 @@ static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
   unsigned i = x;
   
 
-  for (i = x; i < x + width; i+= 256){
+  for (i = x; i < x + width; i+= 1){
+
     unsigned j = y;
     cnt = 0; //counts lines
 
@@ -783,15 +783,15 @@ static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
     
     // to get the vectors on the left side, middle vectors are shifted to the
     // right and we add the last bit that was out of scope
-    vecTabLeft[toplane] = (vecTabMid[toplane]<<1)|(0x01&getBitCellRow(i-1,j-1));
-    vecTabLeft[midlane] = (vecTabMid[midlane]<<1)|(0x01&getBitCellRow(i-1,j));
-    vecTabLeft[botlane] = (vecTabMid[botlane]<<1)|(0x01&getBitCellRow(i-1,j+1));
+    vecTabLeft[toplane] = _mm256_slli_si256(vecTabMid[toplane],1);//|(0x01&getBitCellRow(i-1,j-1));
+    vecTabLeft[midlane] = _mm256_slli_si256(vecTabMid[midlane],1);//|(0x01&getBitCellRow(i-1,j));
+    vecTabLeft[botlane] = _mm256_slli_si256(vecTabMid[botlane],1);//|(0x01&getBitCellRow(i-1,j+1));
 
     // to get the vectors on the right side, middle vectors are shifted to the
     // left and we add the last bit that was out of scope
-    vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((0x01&getBitCellRow(i+AVXBITS,j-1)<<(AVXBITS-1)));
-    vecTabRight[midlane] = (vecTabMid[midlane]>>1)|((0x01&getBitCellRow(i+AVXBITS,j)<<(AVXBITS-1)));
-    vecTabRight[botlane] = (vecTabMid[botlane]>>1)|((0x01&getBitCellRow(i+AVXBITS,j+1)<<(AVXBITS-1)));
+    vecTabRight[toplane] = = _mm256_srli_si256(vecTabMid[midlane],1)|((0x01&getBitCellRow(i+AVXBITS,j)<<(AVXBITS-1)));
+    vecTabRight[midlane] = _mm256_srli_si256(vecTabMid[midlane],1)|((0x01&getBitCellRow(i+AVXBITS,j)<<(AVXBITS-1)));
+    vecTabRight[botlane] = _mm256_srli_si256(vecTabMid[botlane],1)|((0x01&getBitCellRow(i+AVXBITS,j+1)<<(AVXBITS-1)));
     
     for (int j = y; j < y + height; j++){
       //printf("x %d , y %d\n",i,j);
@@ -840,16 +840,110 @@ static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
       _mm256_storeu_si256((void*)(&next_table_row(j,i)),res);
 
       vecTabMid[toplane]   =_mm256_loadu_si256((void*)(&cur_table_row(j+2,i)));
-      vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((0x01&getBitCellRow(i+bits,j+2)<<(bits-1)));
-      vecTabLeft[toplane]  = (vecTabMid[toplane]<<1)|(0x01&getBitCellRow(i-1,j+2));
+      vecTabRight[toplane] = _mm256_srli_si256(vecTabMid[toplane],1);//|((0x01&getBitCellRow(i+bits,j+2)<<(bits-1)));
+      vecTabLeft[toplane]  = _mm256_slli_si256(vecTabMid[toplane],1);//|(getBitCellRow(i-1,j+2));
       cnt++;
-
     }
   }
-
-  return 0;
+  return 1;
 }
 
+static int do_tile_reg_bitbrdvec(int x, int y, int width, int height)
+{
+  unsigned  tileChange = 0;
+ 
+  cell_t vecTabLeft[3];
+  cell_t vecTabMid[3];
+  cell_t vecTabRight[3];
+  cell_t s2;
+  cell_t s3;
+  cell_t a,b,c,d,e,f,g,h;
+  cell_t X;
+  cell_t XAB;
+  cell_t XCD;
+  cell_t XEF;
+  cell_t XGH;
+
+  cell_t change;
+  cell_t res;
+
+  unsigned cnt = 0;
+  
+  #define toplane  ((cnt)%3)
+  #define midlane  ((cnt+1)%3)
+  #define botlane ((cnt+2)%3)
+  
+  unsigned i = x;
+  
+
+  for (i = x; i < x + width; i+= bits){
+
+    unsigned j = y;
+    cnt = 0; //counts lines
+
+    vecTabMid[toplane] = cur_table_row(j-1,i);
+    vecTabMid[midlane] = cur_table_row(j,i);
+    vecTabMid[botlane] = cur_table_row(j+1,i);
+    
+    // to get the vectors on the left side, middle vectors are shifted to the
+    // right and we add the last bit that was out of scope
+    vecTabLeft[toplane] = (vecTabMid[toplane]<<1)|(getBitCellRow(i-1,j-1));
+    vecTabLeft[midlane] = (vecTabMid[midlane]<<1)|(getBitCellRow(i-1,j));
+    vecTabLeft[botlane] = (vecTabMid[botlane]<<1)|(getBitCellRow(i-1,j+1));
+
+    // to get the vectors on the right side, middle vectors are shifted to the
+    // left and we add the last bit that was out of scope
+    vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((getBitCellRow(i+bits,j-1)<<(bits-1)));
+    vecTabRight[midlane] = (vecTabMid[midlane]>>1)|((getBitCellRow(i+bits,j)<<(bits-1)));
+    vecTabRight[botlane] = (vecTabMid[botlane]>>1)|((getBitCellRow(i+bits,j+1)<<(bits-1)));
+    
+    for (int j = y; j < y + height; j++){
+
+      XAB = vecTabLeft[toplane] & vecTabMid[toplane];
+      a   = vecTabLeft[toplane] ^ vecTabMid[toplane];
+      XCD = vecTabRight[toplane] & vecTabLeft[midlane];
+      c   = vecTabRight[toplane] ^ vecTabLeft[midlane];
+      XEF = (vecTabRight[midlane] & vecTabLeft[botlane]);
+      e   = (vecTabRight[midlane] ^ vecTabLeft[botlane]);
+      XGH = (vecTabMid[botlane] &  vecTabRight[botlane]);
+      g   =  (vecTabMid[botlane] ^  vecTabRight[botlane]);
+
+      d =  ( a & c);
+      a =  (a ^ c);
+      c =  (XAB & XCD);
+      b =  (XAB ^  (XCD ^ d));
+
+      h =  ( e & g);
+      e =  (e ^ g);
+      g =  (XEF & XGH);
+      f =   (XEF ^  (XGH ^ h));
+
+      d =  (a & e);
+      a =  (a ^ e);
+      h =  (b & f);
+      b =  (b ^ f);
+      h =  (h |  (b & d));
+      b =  (b ^ d);
+      c =  (c ^  (g ^ h));
+
+      X =  ( ~c  & b);
+      s2=  (X & ~a);
+      s3 =  (X & a);
+
+      res =  (s3 |  (vecTabMid[midlane] & s2));
+
+      next_table_row(j,i) = res;
+
+      change |= vecTabMid[midlane] ^ res;
+
+      vecTabMid[toplane]   = cur_table_row(j+2,i);
+      vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((getBitCellRow(i+bits,j+2)<<(bits-1)));
+      vecTabLeft[toplane]  = (vecTabMid[toplane]<<1)|(getBitCellRow(i-1,j+2));
+      cnt++;
+    }
+  }
+  return change;
+}
 
 static int do_tile_bitbrdvec (int x, int y, int width, int height, int who)
 {
@@ -857,7 +951,7 @@ static int do_tile_bitbrdvec (int x, int y, int width, int height, int who)
 
   monitoring_start_tile (who);
 
-  r = do_tile_reg_bitbrdvec (x, y, width, height);
+  r = do_tile_reg_bitbrdvec2 (x, y, width, height);
 
   monitoring_end_tile (x, y, width, height, who);
 
@@ -1009,23 +1103,26 @@ unsigned life_compute_bitbrdvec(unsigned nb_iter)
   unsigned x;
   unsigned y;
   unsigned who;
-  unsigned res;
+  cell_t change ;
 
   unsigned it = 1;
   for (; it <= nb_iter; it++) {
-    
     //#pragma omp parallel for schedule(dynamic)
     for (int i = 0; i < NB_TILES_Y; i++){
-      for (int j = 0; j < NB_TILES_X; j+=(AVXBITS)){
+      for (int j = 0; j < NB_TILES_X; j++){
         who =omp_get_thread_num();
         x = j * TILE_W;
         y = i * TILE_H;
         who = omp_get_thread_num();
-        res = do_tile_bitbrdvec(x,y,AVXBITS,TILE_H,who);
+        change |= do_tile_bitbrdvec(x,y,TILE_W,TILE_H,who);
 
       }
     }
     swap_tables ();
+    if(!change){
+      return it;
+    }
+    change = 0;
   }
   return 0;
 }
