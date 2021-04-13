@@ -9,7 +9,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-typedef char cell_t;
+typedef unsigned cell_t;
 static unsigned color = 0xFFFF00FF; // Living cells have the yellow color
 
 static cell_t *restrict _table = NULL, *restrict _alternate_table = NULL;
@@ -22,7 +22,7 @@ bool one = !0;
 char threadChange[256];
 char threadBuffer[256];
 
-#define AVXBITS 256 // number of bits in a avx vector
+#define AVXBITS 128 // number of bits in a avx vector
 #define VEC_SIZE (AVXBITS/(sizeof(cell_t)*8)) // number of cellc in a avx vector
 
 
@@ -506,6 +506,22 @@ void prntAVXi( __m256i vec,char * name){
   printf(" ~ i : %d\n",i);
 }
 
+void prntSSE( __m128i vec,char * name){
+  int byteSize = sizeof(char);
+  const size_t n = sizeof(__m128i) / byteSize;
+  char buffer[n];
+  _mm_storeu_si128((void*)buffer, vec);
+  int i = 0;
+  printf("%s : ",name);
+  for (; i < 16 ; i++){
+      //if(buffer[i]!=0)
+      printB(buffer[i]);   
+      //printf("%d",buffer[i]);
+      
+  }
+  printf(" ~ i : %d\n",i);
+}
+
 void printVecLanes(__m256i * vecLst, int topL, int midL, int botL,char * str){
   printf("%s",str);
   prntAVXi(vecLst[topL],"top");
@@ -743,6 +759,114 @@ static int do_tile_bitbrdtest (int x, int y, int width, int height, int who)
   return r;
 }
 
+static int do_tile_reg_bitbrdAVX2(int x, int y, int width, int height)
+{
+  unsigned  tileChange = 0;
+ 
+  __m256i vecTabLeft[3];
+  __m256i vecTabMid[3];
+  __m256i vecTabRight[3];
+  __m256i s2;
+  __m256i s3;
+  __m256i a,b,c,d,e,f,g,h;
+  __m256i X;
+  __m256i XAB;
+  __m256i XCD;
+  __m256i XEF;
+  __m256i XGH;
+  
+  __m256i change;
+  __m256i res;
+
+  unsigned cnt = 0;
+  
+  #define toplane  ((cnt)%3)
+  #define midlane  ((cnt+1)%3)
+  #define botlane ((cnt+2)%3)
+  
+  unsigned i = x;
+  
+
+  for (i = x; i < x + width; i+= 128){
+    unsigned j = y;
+    cnt = 0; //counts lines
+
+    vecTabMid[toplane] = _mm256_loadu_si256((void*)(&cur_table_row(j-1,i)));
+    vecTabMid[midlane] = _mm256_loadu_si256((void*)(&cur_table_row(j,i)));
+    vecTabMid[botlane] = _mm256_loadu_si256((void*)(&cur_table_row(j+1,i)));
+
+    vecTabLeft[toplane] = (vecTabMid[toplane]<<1)|(getBitCellRow(i-1,j-1));
+    vecTabLeft[midlane] = (vecTabMid[midlane]<<1)|(getBitCellRow(i-1,j));
+    vecTabLeft[botlane] = (vecTabMid[botlane]<<1)|(getBitCellRow(i-1,j+1));
+
+    vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((getBitCellRow(i+bits,j-1)<<(bits-1)));
+    vecTabRight[midlane] = (vecTabMid[midlane]>>1)|((getBitCellRow(i+bits,j)<<(bits-1)));
+    vecTabRight[botlane] = (vecTabMid[botlane]>>1)|((getBitCellRow(i+bits,j+1)<<(bits-1)));
+    
+    
+    for (int j = y; j < y + height; j++){
+      // prntSSE(vecTabMid[midlane],"mid");
+      // prntSSE(vecTabLeft[midlane],"left");
+      // printf("\n\n");
+      //printf("x %d , y %d\n",i,j);
+      a = vecTabLeft[toplane];
+      b = vecTabMid[toplane];
+      c = vecTabRight[toplane];
+      d = vecTabLeft[midlane];
+      e = vecTabRight[midlane];
+      f = vecTabLeft[botlane];
+      g = vecTabMid[botlane];
+      h = vecTabRight[botlane];
+
+      XAB = _mm256_and_si256(a,b);
+      a   = _mm256_xor_si256(a,b);
+      XCD = _mm256_and_si256(c,d);
+      c   = _mm256_xor_si256(c,d);
+      XEF = _mm256_and_si256(e,f);
+      e   = _mm256_xor_si256(e,f);
+      XGH = _mm256_and_si256(g,h);
+      g   = _mm256_xor_si256(g,h);
+
+      d = _mm256_and_si256( a, c);
+      a = _mm256_xor_si256(a,c);
+      c = _mm256_and_si256(XAB,XCD);
+      b = _mm256_xor_si256(XAB,_mm256_xor_si256(XCD,d));
+
+      h = _mm256_and_si256( e,g);
+      e = _mm256_xor_si256(e,g);
+      g = _mm256_and_si256(XEF,XGH);
+      f =  _mm256_xor_si256(XEF,_mm256_xor_si256(XGH,h));
+
+      d = _mm256_and_si256(a,e);
+      a = _mm256_xor_si256(a,e);
+      h = _mm256_and_si256(b,f);
+      b = _mm256_xor_si256(b,f);
+      h = _mm256_or_si256(h, _mm256_and_si256(b,d));
+      b = _mm256_xor_si256(b,d);
+      c = _mm256_xor_si256(c ,_mm256_xor_si256(g,h));
+
+      X = _mm256_and_si256( ~c , b);
+      s2= _mm256_and_si256(X, ~a);
+      s3 = _mm256_and_si256(X,a);
+
+      res = _mm256_or_si256(s3, _mm256_and_si256(vecTabMid[midlane],s2));
+    
+      _mm256_storeu_si256((void*)(&next_table_row(j,i)),res);
+
+      vecTabMid[toplane]   = _mm256_loadu_si256((void*)(&cur_table_row(j+2,i)));
+      vecTabLeft[toplane] = (vecTabMid[toplane]<<1)|(getBitCellRow(i-1,j+2));
+      vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((getBitCellRow(i+bits,j+2)<<(bits-1)));
+      // vecTabLeft[toplane] =  _mm_or_si128( _mm_slli_si128(vecTabMid[toplane],1),
+      //                                           _mm_setr_epi32(getBitCellRow(i-1,j+2),0,0,0));
+      // vecTabRight[toplane] = _mm_or_si128( _mm_srli_si128(vecTabMid[toplane],1),   
+      //                                     _mm_setr_epi32(0,0,0,getBitCellRow(i+bits,j+2)<<(31)));//|((0x01&getBitCellRow(i+bits,j+2)<<(bits-1)));
+      
+      cnt++;
+    }
+  }
+  return 1;
+}
+
 static int do_tile_reg_bitbrdSSE(int x, int y, int width, int height)
 {
   unsigned  tileChange = 0;
@@ -772,7 +896,6 @@ static int do_tile_reg_bitbrdSSE(int x, int y, int width, int height)
   
 
   for (i = x; i < x + width; i+= 128){
-
     unsigned j = y;
     cnt = 0; //counts lines
 
@@ -782,23 +905,35 @@ static int do_tile_reg_bitbrdSSE(int x, int y, int width, int height)
     
     // to get the vectors on the left side, middle vectors are shifted to the
     // right and we add the last bit that was out of scope
-    vecTabLeft[toplane] =  _mm_or_si128( _mm_slli_si128(vecTabMid[toplane],1),
-                                                _mm_setr_epi32(getBitCellRow(i-1,j-1),0,0,0));
-    vecTabLeft[midlane] = _mm_or_si128( _mm_slli_si128(vecTabMid[midlane],1),
-                                                _mm_setr_epi32(getBitCellRow(i-1,j),0,0,0));
-    vecTabLeft[botlane] = _mm_or_si128( _mm_slli_si128(vecTabMid[botlane],1),
-                                                _mm_setr_epi32(getBitCellRow(i-1,j+1),0,0,0));
+    // vecTabLeft[toplane] =  _mm_or_si128( _mm_slli_si128(vecTabMid[toplane],1),
+    //                                             _mm_setr_epi32(getBitCellRow(i-1,j-1),0,0,0));
+    // vecTabLeft[midlane] = _mm_or_si128( _mm_slli_si128(vecTabMid[midlane],1),
+    //                                             _mm_setr_epi32(getBitCellRow(i-1,j),0,0,0));
+    // vecTabLeft[botlane] = _mm_or_si128( _mm_slli_si128(vecTabMid[botlane],1),
+    //                                             _mm_setr_epi32(getBitCellRow(i-1,j+1),0,0,0));
 
     // to get the vectors on the right side, middle vectors are shifted to the
     // left and we add the last bit that was out of scope
-    vecTabRight[toplane] = _mm_or_si128( _mm_srli_si128(vecTabMid[toplane],1),   
-                                          _mm_setr_epi32(0,0,0,getBitCellRow(i+AVXBITS,j-1)<<(31)));
-    vecTabRight[midlane] = _mm_or_si128( _mm_srli_si128(vecTabMid[midlane],1),   
-                                          _mm_setr_epi32(0,0,0,getBitCellRow(i+AVXBITS,j)<<(31)));
-    vecTabRight[botlane] =_mm_or_si128( _mm_srli_si128(vecTabMid[botlane],1),   
-                                          _mm_setr_epi32(0,0,0,getBitCellRow(i+AVXBITS,j+1)<<(31)));
+    // vecTabRight[toplane] = _mm_or_si128( _mm_srli_si128(vecTabMid[toplane],1),   
+    //                                       _mm_setr_epi32(0,0,0,getBitCellRow(i+bits,j-1)<<(31)));
+    // vecTabRight[midlane] = _mm_or_si128( _mm_srli_si128(vecTabMid[midlane],1),   
+    //                                       _mm_setr_epi32(0,0,0,getBitCellRow(i+bits,j)<<(31)));
+    // vecTabRight[botlane] =_mm_or_si128( _mm_srli_si128(vecTabMid[botlane],1),   
+    //                                       _mm_setr_epi32(0,0,0,getBitCellRow(i+bits,j+1)<<(31)));
+
+    vecTabLeft[toplane] = (vecTabMid[toplane]<<1)|(getBitCellRow(i-1,j-1));
+    vecTabLeft[midlane] = (vecTabMid[midlane]<<1)|(getBitCellRow(i-1,j));
+    vecTabLeft[botlane] = (vecTabMid[botlane]<<1)|(getBitCellRow(i-1,j+1));
+
+    vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((getBitCellRow(i+bits,j-1)<<(bits-1)));
+    vecTabRight[midlane] = (vecTabMid[midlane]>>1)|((getBitCellRow(i+bits,j)<<(bits-1)));
+    vecTabRight[botlane] = (vecTabMid[botlane]>>1)|((getBitCellRow(i+bits,j+1)<<(bits-1)));
+    
     
     for (int j = y; j < y + height; j++){
+      // prntSSE(vecTabMid[midlane],"mid");
+      // prntSSE(vecTabLeft[midlane],"left");
+      // printf("\n\n");
       //printf("x %d , y %d\n",i,j);
       a = vecTabLeft[toplane];
       b = vecTabMid[toplane];
@@ -842,14 +977,15 @@ static int do_tile_reg_bitbrdSSE(int x, int y, int width, int height)
 
       res = _mm_or_si128(s3, _mm_and_si128(vecTabMid[midlane],s2));
     
-      _mm_storeu_si128((void*)(&next_table_row(j,i)),vecTabLeft[midlane]);
+      _mm_storeu_si128((void*)(&next_table_row(j,i)),res);
 
       vecTabMid[toplane]   = _mm_loadu_si128((void*)(&cur_table_row(j+2,i)));
-
-      vecTabLeft[toplane] =  _mm_or_si128( _mm_slli_si128(vecTabMid[toplane],1),
-                                                _mm_setr_epi32(getBitCellRow(i-1,j+2),0,0,0));
-      vecTabRight[toplane] = _mm_or_si128( _mm_srli_si128(vecTabMid[toplane],1),   
-                                          _mm_setr_epi32(0,0,0,getBitCellRow(i+AVXBITS,j+2)<<(31)));//|((0x01&getBitCellRow(i+bits,j+2)<<(bits-1)));
+      vecTabLeft[toplane] = (vecTabMid[toplane]<<1)|(getBitCellRow(i-1,j+2));
+      vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((getBitCellRow(i+bits,j+2)<<(bits-1)));
+      // vecTabLeft[toplane] =  _mm_or_si128( _mm_slli_si128(vecTabMid[toplane],1),
+      //                                           _mm_setr_epi32(getBitCellRow(i-1,j+2),0,0,0));
+      // vecTabRight[toplane] = _mm_or_si128( _mm_srli_si128(vecTabMid[toplane],1),   
+      //                                     _mm_setr_epi32(0,0,0,getBitCellRow(i+bits,j+2)<<(31)));//|((0x01&getBitCellRow(i+bits,j+2)<<(bits-1)));
       
       cnt++;
     }
@@ -958,7 +1094,7 @@ static int do_tile_bitbrdvec (int x, int y, int width, int height, int who)
 
   monitoring_start_tile (who);
 
-  r = do_tile_reg_bitbrd (x, y, width, height);
+  r = do_tile_reg_bitbrdSSE(x, y, width, height);
 
   monitoring_end_tile (x, y, width, height, who);
 
