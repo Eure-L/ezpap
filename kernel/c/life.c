@@ -1013,6 +1013,7 @@ static int do_tile_reg_bitbrd(int x, int y, int width, int height)
   cell_t vecTabLeft[3];
   cell_t vecTabMid[3];
   cell_t vecTabRight[3];
+  cell_t vecChange;
   cell_t s2;
   cell_t s3;
   cell_t a,b,c,d,e,f,g,h;
@@ -1022,7 +1023,7 @@ static int do_tile_reg_bitbrd(int x, int y, int width, int height)
   cell_t XEF;
   cell_t XGH;
 
-  cell_t change;
+  cell_t change = false;
   cell_t res;
 
   unsigned cnt = 0;
@@ -1092,7 +1093,7 @@ static int do_tile_reg_bitbrd(int x, int y, int width, int height)
 
       next_table_row(j,i) = res;
 
-      change |= vecTabMid[midlane] ^ res;
+      change |= !(vecTabMid[midlane] == res);
 
       vecTabMid[toplane]   = cur_table_row(j+2,i);
       vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((getBitCellRow(i+bits,j+2)<<(bits-1)));
@@ -1100,7 +1101,7 @@ static int do_tile_reg_bitbrd(int x, int y, int width, int height)
       cnt++;
     }
   }
-  return change!=0;
+  return change;
 }
 
 static int do_tile_bitbrdvec (int x, int y, int width, int height, int who)
@@ -1261,19 +1262,23 @@ unsigned life_compute_bitbrdvec(unsigned nb_iter)
   unsigned x;
   unsigned y;
   unsigned who;
-
+  unsigned res;
   unsigned it = 1;
   for (; it <= nb_iter; it++) {
-    #pragma omp parallel for schedule(dynamic)
+    #pragma omp parallel for schedule(dynamic) private(res,x,y,who)
     for (int i = 0; i < NB_TILES_Y; i++){
       for (int j = 0; j < NB_TILES_X; j++){
-        who =omp_get_thread_num();
-        x = j * TILE_W;
-        y = i * TILE_H;
-        who = omp_get_thread_num();
-        do_tile_bitbrdvec(x,y,TILE_W,TILE_H,who);
+        if(hasNeighbourChanged(j,i)){
+          who =omp_get_thread_num();
+          x = j * TILE_W;
+          y = i * TILE_H;
+          who = omp_get_thread_num();
+          res = do_tile_bitbrdvec(x,y,TILE_W,TILE_H,who);
+          next_map(j,i)=res;
+        }
       }
     }
+    deleteCurrentBtmp();
     swap_tables ();
     
   }
