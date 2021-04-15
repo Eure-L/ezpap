@@ -1109,7 +1109,7 @@ static int do_tile_bitbrdvec (int x, int y, int width, int height, int who)
 
   monitoring_start_tile (who);
 
-  r = do_tile_reg_bitbrdSSE(x, y, width, height);
+  r = do_tile_reg_bitbrd(x, y, width, height);
 
   monitoring_end_tile (x, y, width, height, who);
 
