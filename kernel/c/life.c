@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 // Changer le type en char pour lazybtmpvec
-typedef unsigned cell_t;
+typedef char cell_t;
 
 static unsigned color = 0xFFFF00FF; // Living cells have the yellow color
 
@@ -179,7 +179,10 @@ void life_refresh_img_ocl_hybrid (void){
   printf("refresh_img_ocl_hybrid\n");
 
   cl_int err;
-  err = clEnqueueReadBuffer (queue, cur_buffer, CL_TRUE, 0, _table_SIZE-(cpu_y_part*DIM), _table+cpu_y_part*DIM, 0, NULL, NULL);
+  unsigned offset =  cpu_y_part * DIM;
+  err = clEnqueueReadBuffer (queue, cur_buffer, CL_TRUE,offset,
+                             gpu_y_part*DIM, _table+offset, 
+                             0, NULL, NULL);
   check (err, "Failed to read buffer from GPU");
   life_refresh_img();
 
@@ -952,7 +955,7 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
           y=j * TILE_H;
           who = omp_get_thread_num();   
           if(i>0 && i<NB_TILES_X && j>0 && j< NB_TILES_Y)    
-            res = do_tile(x, y , TILE_W, TILE_H, who);
+            res = do_tile_vec(x, y , TILE_W, TILE_H, who);
           else
             res = do_tile(x, y , TILE_W, TILE_H, who);
           threadChange[who] |= res;
@@ -961,35 +964,33 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
       } 
     }
 
-    if (do_display) {
-    // Send CPU contribution to GPU memory
-    err = clEnqueueWriteBuffer (queue, cur_buffer, CL_TRUE, 0,
-                                DIM * cpu_y_part * sizeof (cell_t), _table, 0,
-                                NULL, &kernel_event);
-    check (err, "Failed to send CPU contribution to the buffer");
-  } else
-    PRINT_DEBUG ('u', "In average, GPU took %.1f%% of the lines\n",
-                 (float)gpu_accumulated_lines * 100 / (DIM * nb_iter));
-
-    // Send cpu contribution to GPU memory
-    //  err =clEnqueueWriteBuffer (queue, cur_buffer, CL_TRUE, 0,
-    //          cpu_y_part*DIM*sizeof(cell_t), _table, 0, NULL,&kernel_event);
-    // check (err, "Failed to send CPU contribution to the buffer");
-
-    deleteCurrentBtmp();
-
+    // CPU waiting for the GPU to finish
     clFinish (queue);
 
-      // Retrieves the Buffer
+    //////// Workshare CPU - GPU contribution
+    //  Send CPU contribution to GPU memory
+    err = clEnqueueWriteBuffer (queue, next_buffer, CL_TRUE, 0,
+                                DIM * cpu_y_part * sizeof (cell_t), _alternate_table, 0,
+                                NULL, &kernel_event);
+    //  Send GPU border line contribution to RAM
+    check (err, "Failed to send CPU contribution to the buffer");
+    err = clEnqueueReadBuffer (queue, next_buffer, CL_TRUE, cpu_y_part * DIM * sizeof(cell_t),
+                                DIM * sizeof (cell_t),
+                                 _alternate_table + (DIM * cpu_y_part) ,
+                                  0, NULL, &kernel_event);
+    check (err, "Failed to send GPU contribution to the RAM");
+
+    // Retrieves the GpuChangeBuffer
     err = clEnqueueReadBuffer(queue, changeBuffer, CL_TRUE, 0, sizeof(unsigned),
           &gpuChange, 0, NULL, &kernel_event);
-    //check (err, "Failed to Read the buffer");
+    check (err, "Failed to Read the buffer");
+
+    deleteCurrentBtmp();
+    swap_buffers();
+    swap_tables();
 
     if(!gpuChange && !hasAnyTileChanged())
       return it;
-
-    swap_buffers();
-    swap_tables();
   }
 
   clFinish (queue);

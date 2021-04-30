@@ -1,6 +1,6 @@
 #include "kernel/ocl/common.cl"
 
-typedef unsigned cell_t;
+typedef char cell_t;
 
 #define R 255
 #define G 255
@@ -12,7 +12,7 @@ typedef unsigned cell_t;
 ////////////////    Tools
 static inline int table_cell ( int y, int x)
 {
-    return ((y)* (DIM) + x) * (sizeof(unsigned)/sizeof(cell_t)); 
+    return ((y)* (DIM) + x); 
 }
 
 #define table(y, x) (table_cell ((y), (x)))
@@ -36,8 +36,8 @@ __kernel void life_ocl(__global cell_t * in, __global cell_t * out,__global bool
     int x = get_global_id (0);
     
     if(x>0 && y> 0 && x< DIM && y<DIM){ 
-        cell_t  n = 0;
-        cell_t me  = in[table(y,x)] != 0;
+        unsigned  n = 0;
+        unsigned me  = in[table(y,x)] != 0;
 
         n += in[table(y,x)];
         n += in[table(y-1,x)];
@@ -106,9 +106,20 @@ __kernel void life_update_texture (__global cell_t *cur, __write_only image2d_t 
     int x = get_global_id (0);
     int2 pos = (int2)(x, y);
     
-    cell_t color = cur [y * DIM + x];
+    unsigned color = cur [y * DIM + x];
 
-    write_imagef (tex, (int2)(x, y), color_scatter (color*0xFFFF00FF));;
+    write_imagef (tex, (int2)(x, y), color_scatter (color*0xFFFF00FF));
+
+    // int y = get_global_id (1);
+    // int x = get_global_id (0);
+    // int2 pos = (int2)(x, y);
+    // unsigned c = cur [y * DIM + x];
+
+    // c = rgba(R*c, G*c, B*c, 0xFF);
+
+    // write_imagef (tex, pos, color_scatter (c));
+
+
 }
 
 #else
