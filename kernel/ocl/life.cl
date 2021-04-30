@@ -1,12 +1,15 @@
 #include "kernel/ocl/common.cl"
 
+typedef unsigned cell_t;
 
 #define R 255
 #define G 255
 #define B 0
+#define bits sizeof(cell_t)*8
+#define AVXBITS 256
+#define VEC_SIZE (AVXBITS/(sizeof(cell_t)*8))
 
-typedef unsigned cell_t;
-
+////////////////    Tools
 static inline int table_cell ( int y, int x)
 {
     return ((y)* (DIM) + x) * (sizeof(unsigned)/sizeof(cell_t)); 
@@ -14,7 +17,19 @@ static inline int table_cell ( int y, int x)
 
 #define table(y, x) (table_cell ((y), (x)))
 
+//returns the index of the word of type cell_t, containing the cell at coordinate x,y
+// static inline cell_t *table_cell_row ( int y, int x)
+// { 
+//   return  (y+1) * (DIM) + (((x+bits)/bits)+VEC_SIZE);
+// }
 
+// #define table_row(y, x) ((*table_cell_row ((y), (x))))
+
+static inline unsigned getBitCellRow(cell_t cell, unsigned i){
+  return cell>>((i)%bits)&(0x01);
+}
+
+//////////////////  OCL VERSIONS
 __kernel void life_ocl(__global cell_t * in, __global cell_t * out,__global bool * change){
 
     int y = get_global_id (1);
@@ -43,55 +58,71 @@ __kernel void life_ocl(__global cell_t * in, __global cell_t * out,__global bool
     }
 }
 
-
-__kernel void life_ocl2(__global cell_t * in, __global cell_t * out,__global bool * change){
-
-    short y = get_group_id (1);
-    short x = get_group_id (0);
+__kernel void life_ocl_hybrid(__global cell_t * in, __global cell_t * out,__global bool * change,
+                                 unsigned  gpu_y_part,  unsigned  cpu_y_part){
+    int y = get_global_id (1) + cpu_y_part;
+    int x = get_global_id (0);
     
-    char yloc = get_local_id (1);
-    char xloc = get_local_id (0);
-
-    local char ntab[3][3];
-
     if(x>0 && y> 0 && x< DIM && y<DIM){ 
+        unsigned  n = 0;
+        unsigned me  = in[table(y,x)] != 0;
 
-        ntab[xloc][yloc]=in[table(y+(2-yloc-1),x+(2-xloc-1))];
+        n += in[table(y,x)];
+        n += in[table(y-1,x)];
+        n += in[table(y,x-1)];
+        n += in[table(y-1,x-1)];
+        n += in[table(y+1,x)];
+        n += in[table(y,x+1)];
+        n += in[table(y+1,x+1)];
+        n += in[table(y+1,x-1)];
+        n += in[table(y-1,x+1)];    
 
-        for(int i = 1 ; i < 3; i++){ // reduction des collones
-            barrier (CLK_LOCAL_MEM_FENCE);
-            if(xloc == 0){
-                ntab[xloc][yloc]+=ntab[i][yloc];
-            }
-        }
-
-         // reduction des lignes
-        barrier (CLK_LOCAL_MEM_FENCE);
-        if(xloc ==0 && yloc == 0){
-            unsigned me = in[table(y,x)];
-            unsigned n = 0;  
-            n += ntab[0][0];
-            n += ntab[0][1];
-            n += ntab[0][2];
-            n = (n == 3 + me) | (n == 3);
-            out[table(y,x)]=n;
-            if(me!=n)
-                *change |= 1;
-        }
+        n = (n == 3 + me) | (n == 3);
+        
+        if (n != me)
+            *change = 1;
+        
+        out[table(y,x)]=1;
     }
+}
+
+__kernel void life_ocl_bits(__global cell_t * in, __global cell_t * out,__global bool * change){
+
+    int y = get_global_id (1);
+    int x = get_global_id (0)*bits;
+
+    // the thread operates on the word containing the desired cell
+
+
+    out[y*DIM+x] = 1;
+        
     
 }
 
-
-
-__kernel void life_update_texture (__global unsigned *cur, __write_only image2d_t tex)
+#if 1
+__kernel void life_update_texture (__global cell_t *cur, __write_only image2d_t tex)
 {
     int y = get_global_id (1);
     int x = get_global_id (0);
     int2 pos = (int2)(x, y);
-    unsigned c = cur [y * DIM + x];
+    
+    cell_t color = cur [y * DIM + x];
+
+    write_imagef (tex, (int2)(x, y), color_scatter (color*0xFFFF00FF));;
+}
+
+#else
+__kernel void life_update_texture (__global cell_t *cur, __write_only image2d_t tex)
+{
+    int y = get_global_id (1);
+    int x = get_global_id (0);
+    int2 pos = (int2)(x, y);
+    unsigned c = ((cur[y * DIM + x/bits])>> x%bits) & 0x01;
+    printf("%d", cur[y * DIM + x/bits]);
 
     c = rgba(R*c, G*c, B*c, 0xFF);
 
     write_imagef (tex, pos, color_scatter (c));
 }
+
+#endif

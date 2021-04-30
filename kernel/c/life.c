@@ -41,6 +41,8 @@ unsigned SIZEY ;
 #define DIMTOT (SIZEX*SIZEY)
 
 cl_mem changeBuffer;
+static unsigned cpu_y_part;
+static unsigned gpu_y_part;
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
 {
@@ -128,6 +130,11 @@ static inline void setcurBitCellRow(int i, int j, unsigned val){
   (cur_table_row(j,i) & ~(0x01<<((i)%bits))) | (val<<((i)%bits));
 }
 
+static inline void OCLsetcurBitCellRow(int i, int j, unsigned val){
+  cur_img(j,i) = 
+  (cur_img(j,i) & ~(0x01<<((i)%bits))) | (val<<((i)%bits));
+}
+
 static inline void setnextBitCellRow(int i, int j, unsigned val){
   next_table_row(j,i) = 
   ((next_table_row(j,i)& ~(0x01<<((i%bits)))) | (val<<((i)%bits)));
@@ -140,6 +147,7 @@ static inline unsigned getBitCellRow(int i, int j){
 // This function is called whenever the graphical window needs to be refreshed
 void life_refresh_img (void)
 {
+  printf("refresh\n");
   for (int i = 0; i < DIM; i++)
     for (int j = 0; j < DIM; j++)
       cur_img (i, j) = cur_table (i, j) * color;
@@ -147,13 +155,38 @@ void life_refresh_img (void)
 
 void life_refresh_img_gottagofast (void)
 {
-  //printf("refresh gottagofast\n");
+  printf("refresh gottagofast\n");
   for (int i = 0; i < DIM; i++){
     for (int j = 0; j < DIM; j++){
         cur_img (i, j) = (getBitCellRow (j, i) )* color; 
     }
   }
+  printf("end refresh gottagofast\n");
 }
+
+void life_refresh_img_ocl_bits (void){
+  printf("refresh_img_ocl_bits\n");
+
+  cl_int err;
+  err = clEnqueueReadBuffer (queue, cur_buffer, CL_TRUE, 0, _table_SIZE, _table, 0, NULL, NULL);
+  check (err, "Failed to read buffer from GPU");
+  life_refresh_img_gottagofast();
+
+  printf("end refresh_img_ocl_bits\n");
+}
+
+void life_refresh_img_ocl_hybrid (void){
+  printf("refresh_img_ocl_hybrid\n");
+
+  cl_int err;
+  err = clEnqueueReadBuffer (queue, cur_buffer, CL_TRUE, 0, _table_SIZE, _table+cpu_y_part*DIM, 0, NULL, NULL);
+  check (err, "Failed to read buffer from GPU");
+  life_refresh_img();
+
+  printf("end refresh_img_ocl_hybrid\n");
+}
+
+
 
 char * initBtmptls(void){
   
@@ -232,12 +265,10 @@ void prntAVXi( __m256i vec,char * name){
   printf(" ~ i : %d\n",i);
 }
 
-
 void clear_table(cell_t * table){
   for(int i =0; i<DIMTOT;i++)
     *(table+i)=0;
 }
-
 
 static inline bool hasNeighbourChanged(unsigned i,unsigned j){
   //printf("isok\n");
@@ -284,19 +315,16 @@ void life_finalize (void)
 
 void life_init_ocl(void)
 {
+  printf("init ocl\n");
   life_init();
   changeBuffer = clCreateBuffer (context, CL_MEM_READ_WRITE,
                             sizeof (unsigned), NULL, NULL);
-
-}
-
-void life_init_ocl2(void){
-  life_init_ocl();
+  printf("end initocl\n");
 }
 
 void life_init_gottagofast(void)
 {
-    printf("init bitbrdvec\n");
+  printf("init bitbrdvec\n");
   ENABLE_BITCELL = 2;
   bits = sizeof(cell_t)*8;
   SIZEX =(DIM/bits+(2*(VEC_SIZE)));
@@ -313,10 +341,39 @@ void life_init_gottagofast(void)
   }
   if(bitMapTls==NULL)
     bitMapTls = initBtmptls(); 
-  zero = _mm256_setzero_si256(); 
-  mask1 = _mm256_set1_epi8(1);
+  
   clear_table(_table);
+  printf("end init bitbrdvec\n");
+
+  
 }
+
+void life_init_ocl_bits(void){
+  printf("init ocl_bits\n");
+
+  bits = sizeof(cell_t)*8;
+  SIZEX =(DIM/bits);
+  SIZEY =(DIM);
+  if (_table == NULL) {
+    const unsigned size = _table_SIZE*2;
+    PRINT_DEBUG ('u', "Memory footprint = 2 x %d bytes\n", size);
+
+    _table = mmap (NULL, size, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0 );
+
+    _alternate_table = mmap (NULL, size, PROT_READ | PROT_WRITE,
+                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  }
+  if(bitMapTls==NULL)
+    bitMapTls = initBtmptls(); 
+  
+  changeBuffer = clCreateBuffer (context, CL_MEM_READ_WRITE,
+                            sizeof (unsigned), NULL, NULL);
+  ENABLE_BITCELL = 2;
+
+    printf("end ocl_bits\n");
+}
+
 
 static inline void swap_tables (void)
 {
@@ -332,6 +389,61 @@ void printVecLanes(__m256i * vecLst, int topL, int midL, int botL,char * str){
   prntAVXi(vecLst[midL],"mid");
   prntAVXi(vecLst[botL],"bot");
 }
+
+///////////////////////////// Sequential version (seq)
+
+static int compute_new_state (int y, int x)
+{
+  unsigned n      = 0;
+  unsigned me     = cur_table (y, x) != 0;
+  unsigned change = 0;
+
+  if (x > 0 && x < DIM - 1 && y > 0 && y < DIM - 1) {
+
+    n += cur_table (y,x);
+    n += cur_table (y-1,x);
+    n += cur_table (y,x-1);
+    n += cur_table (y-1,x-1);
+    n += cur_table (y+1,x);
+    n += cur_table (y,x+1);
+    n += cur_table (y+1,x+1);
+    n += cur_table (y+1,x-1);
+    n += cur_table (y-1,x+1);
+
+    n = (n == 3 + me) | (n == 3);
+    if (n != me)
+      change |= 1;
+
+    next_table (y, x) = n;
+  }
+  return change;
+}
+
+// Tile inner computation
+static int do_tile_reg (int x, int y, int width, int height)
+{
+  int change = 0;
+
+  for (int i = y; i < y + height; i++)
+    for (int j = x; j < x + width; j++)
+      change |= compute_new_state (i, j);
+
+  return change;
+}
+
+static int do_tile (int x, int y, int width, int height, int who)
+{
+  int r;
+
+  monitoring_start_tile (who);
+
+  r = do_tile_reg (x, y, width, height);
+
+  monitoring_end_tile (x, y, width, height, who);
+
+  return r;
+}
+
 
 /////////////////////////////////////////// vectorial version
 
@@ -437,7 +549,6 @@ static int do_tile_vec (int x, int y, int width, int height, int who)
 
   return r;
 }
-
 
 static int do_tile_reg_bitbrd(int x, int y, int width, int height)
 { 
@@ -547,7 +658,7 @@ static int do_tile_bitbrdvec (int x, int y, int width, int height, int who)
   return r;
 }
 
-
+// returns true if any thread has witnessed any change
 static bool hasAnyTileChanged(void){
   for(int i =0 ; i < 256; i ++){
     if(threadChange[i]){
@@ -556,7 +667,6 @@ static bool hasAnyTileChanged(void){
   }
   return false;
 }
-
 
 //////////////////////// BitMap2 lazy vectorial Version ;
 //OMP_PLACES=cores OMP_NUM_THREADS=1 ./run -k life -s 2048 -ts 64 -v lazybtmpvec -m
@@ -575,7 +685,7 @@ unsigned life_compute_lazybtmpvec (unsigned nb_iter){
 
   for(unsigned it=1; it<=nb_iter;it++){
 
-    #pragma omp parallel for schedule(dynamic) private(res,x,y,who)
+    #pragma omp parallel for schedule(static) private(res,x,y,who)
     for(int j = 0; j< NB_TILES_Y * xgrain ;j++){ 
       for(int i = 0; i< (NB_TILES_X/xgrain)  ;i++){
         int column = j/NB_TILES_Y;
@@ -634,7 +744,6 @@ unsigned life_compute_gottagofast(unsigned nb_iter)
   return 0;
 }
 
-
 static inline void swap_buffers(void)
 {
   cl_mem tmp2  = cur_buffer;
@@ -642,7 +751,7 @@ static inline void swap_buffers(void)
   next_buffer = tmp2;
 }
 
-///////////////////////////// OpenCL big variant (ocl_big)
+///////////////////////////// OpenCL  variant (ocl)
 // ./run -k life -o
 unsigned life_invoke_ocl (unsigned nb_iter)
 {
@@ -694,32 +803,29 @@ unsigned life_invoke_ocl (unsigned nb_iter)
   return 0;
 }
 
+unsigned life_invoke_ocl_bits(unsigned nb_iter){
 
-unsigned life_invoke_ocl2 (unsigned nb_iter)
-{
-  size_t global[2] = {DIM*3,DIM*3};
-  size_t local[2]  = {3,3};
-  cl_int err;
+  size_t global[2] = {(DIM/bits),(DIM)};
+
+  cl_int err; 
+  err = clEnqueueWriteBuffer(queue, cur_buffer, CL_TRUE, 0, _table_SIZE, _table, 0, NULL, NULL);
+  check (err, "Failed to write buffer to GPU");
 
   bool gpuChange = False;
-
-  cl_mem changeBuffer = clCreateBuffer (context, CL_MEM_READ_WRITE,
-                            sizeof (unsigned), NULL, NULL);
-  
+                
   monitoring_start_tile (easypap_gpu_lane (TASK_TYPE_COMPUTE));
 
   for (unsigned it = 1; it <= nb_iter; it++) {
-    
-    
+    gpuChange = False;
     err = 0;
 
     // Modifies the buffer
-    if(!(it%100)){
-    gpuChange = False;
-    err |=clEnqueueWriteBuffer (queue, changeBuffer, CL_TRUE, 0,
+    err =clEnqueueWriteBuffer (queue, cur_buffer, CL_TRUE, 0,
+            _table_SIZE, _table, 0, NULL,NULL);
+
+    err =clEnqueueWriteBuffer (queue, changeBuffer, CL_TRUE, 0,
              sizeof (unsigned int), &gpuChange, 0, NULL,NULL); 
     check (err, "Failed to write the buffer");
-    }
 
     // Sets Kernel arguments
     err |= clSetKernelArg (compute_kernel, 0,  sizeof (cl_mem), &cur_buffer);
@@ -728,19 +834,21 @@ unsigned life_invoke_ocl2 (unsigned nb_iter)
     check (err, "Failed to set kernel arguments");
 
     // Launches GPU kernel
-    err |= clEnqueueNDRangeKernel (queue, compute_kernel, 2, NULL, global, local,
+    err = clEnqueueNDRangeKernel (queue, compute_kernel, 2, NULL, global, NULL,
                                   0, NULL, NULL);
     check (err, "Failed to execute kernel");
 
-    if(!(it%100)){
-      //Retrieves the Buffer
-      err |= clEnqueueReadBuffer(queue, changeBuffer, CL_TRUE, 0, sizeof(unsigned),
-            &gpuChange, 0, NULL, NULL);
-      check (err, "Failed to Read the buffer");
+    // Retrieves the Buffer
+    err = clEnqueueReadBuffer(queue, changeBuffer, CL_TRUE, 0, sizeof(unsigned),
+          &gpuChange, 0, NULL, NULL);
 
-      if(!gpuChange)
-        return it;
-    }
+    err = clEnqueueReadBuffer (queue, cur_buffer, CL_TRUE, 0, _table_SIZE, _table, 0, NULL, NULL);
+    check (err, "Failed to read buffer from GPU");
+    //check (err, "Failed to Read the buffer");
+
+    if(false)
+      return it;
+
     swap_buffers();
     swap_tables();
   }
@@ -748,6 +856,138 @@ unsigned life_invoke_ocl2 (unsigned nb_iter)
   clFinish (queue);
 
   monitoring_end_tile (0, 0, DIM, DIM, easypap_gpu_lane (TASK_TYPE_COMPUTE));
+
+  return 0;
+
+}
+
+
+static unsigned cpu_y_part;
+static unsigned gpu_y_part;
+
+
+void life_init_ocl_hybrid(void){
+  printf("init ocl_hybrids\n");
+
+  bits = sizeof(cell_t)*8;
+  SIZEX =(DIM);
+  SIZEY =(DIM);
+  if (_table == NULL) {
+    const unsigned size = _table_SIZE*2;
+    PRINT_DEBUG ('u', "Memory footprint = 2 x %d bytes\n", size);
+
+    _table = mmap (NULL, size, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0 );
+
+    _alternate_table = mmap (NULL, size, PROT_READ | PROT_WRITE,
+                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  }
+  if(bitMapTls==NULL)
+    bitMapTls = initBtmptls(); 
+  
+  changeBuffer = clCreateBuffer (context, CL_MEM_READ_WRITE,
+                            sizeof (unsigned), NULL, NULL);
+
+  printf("end ocl_hybrid\n");
+  zero = _mm256_setzero_si256(); 
+  mask1 = _mm256_set1_epi8(1);
+  ENABLE_BITCELL = 0;
+
+  if (GPU_TILE_H != TILE_H)
+  exit_with_error ("CPU and GPU Tiles should have the same height (%d != %d)",
+                    GPU_TILE_H, TILE_H);
+
+  cpu_y_part = (NB_TILES_Y / 2) * GPU_TILE_H; // Start with fifty-fifty
+  gpu_y_part = DIM - cpu_y_part;
+
+}
+
+
+unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
+{
+  //GPU VARIABLES
+  size_t global[2] = {DIM, gpu_y_part};
+  cl_int err;
+  cl_event kernel_event;
+  int gpu_accumulated_lines = 0;
+
+  //CPU VARIABLES
+  unsigned x;
+  unsigned y;
+  unsigned who;
+  unsigned res;
+
+  bool gpuChange = False;
+
+  for (unsigned it = 1; it <= nb_iter; it++) {
+    gpuChange = False;
+    err = 0;
+    // Modifies the buffer
+    err =clEnqueueWriteBuffer (queue, changeBuffer, CL_TRUE, 0,
+             sizeof (unsigned int), &gpuChange, 0, NULL,&kernel_event); 
+    check (err, "Failed to write the buffer");
+
+    // Sets Kernel arguments
+    err |= clSetKernelArg (compute_kernel, 0,  sizeof (cl_mem), &cur_buffer);
+    err |= clSetKernelArg (compute_kernel, 1,  sizeof (cl_mem), &next_buffer);
+    err |= clSetKernelArg (compute_kernel, 2,  sizeof (cl_mem), &changeBuffer);
+    check (err, "Failed to set kernel arguments");
+    err |= clSetKernelArg (compute_kernel, 3, sizeof (unsigned), &gpu_y_part);
+    err |= clSetKernelArg (compute_kernel, 4, sizeof (unsigned), &cpu_y_part);
+    check (err, "Failed to set kernel arguments");
+
+    // Launches GPU kernel
+    err = clEnqueueNDRangeKernel (queue, compute_kernel, 2, NULL, global, NULL,
+                                  0, NULL, &kernel_event);
+    check (err, "Failed to execute kernel");
+    clFlush (queue);
+
+    //CPU version
+    #pragma omp parallel for schedule(dynamic) private(res,x,y,who)
+    for(int j = 0; j< cpu_y_part/TILE_H  ;j++){ 
+      for(int i = 0; i< NB_TILES_X  ;i++){
+        //if(hasNeighbourChanged(i,j)){
+          x=i * TILE_W;
+          y=j * TILE_H;
+          who = omp_get_thread_num();   
+          if(i>0 && i<NB_TILES_X && j>0 && j< NB_TILES_Y)    
+            res = do_tile_vec(x, y , TILE_W, TILE_H, who);
+          else
+            res = do_tile(x, y , TILE_W, TILE_H, who);
+          threadChange[who] |= res;
+          *next_mapAddr(i,j)=res;      
+        //}
+      } 
+    }
+    
+    deleteCurrentBtmp();
+    swap_tables ();
+
+    clFinish (queue);
+
+      // Retrieves the Buffer
+    err = clEnqueueReadBuffer(queue, changeBuffer, CL_TRUE, 0, sizeof(unsigned),
+          &gpuChange, 0, NULL, &kernel_event);
+    //check (err, "Failed to Read the buffer");
+
+    if(!gpuChange && !hasAnyTileChanged())
+      return it;
+
+    swap_buffers();
+    swap_tables();
+  }
+
+  clFinish (queue);
+
+  if (do_display) {
+    // Send CPU contribution to GPU memory
+    err = clEnqueueWriteBuffer (queue, cur_buffer, CL_TRUE, 0,
+                                DIM * cpu_y_part * sizeof (unsigned), image, 0,
+                                NULL, &kernel_event);
+    check (err, "Failed to write to buffer");
+  } else
+    PRINT_DEBUG ('u', "In average, GPU took %.1f%% of the lines\n",
+                 (float)gpu_accumulated_lines * 100 / (DIM * nb_iter));
 
   return 0;
 }
@@ -758,13 +998,16 @@ void life_draw_guns (void);
 
 static inline void set_cell (int y, int x)
 {
-
+  //printf("set\n");
   if(ENABLE_BITCELL==2)
     setcurBitCellRow(x,y,1);
   else
     cur_table (y, x) = 1;
-  if (opencl_used)
-    cur_img (y, x) = 1;
+  if (opencl_used){
+      *((cell_t*)image + y*DIM + x) = 1;
+  }
+  //printf("end set\n");
+
 }
 
 static inline int get_cell (int y, int x)
