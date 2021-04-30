@@ -36,8 +36,8 @@ __kernel void life_ocl(__global cell_t * in, __global cell_t * out,__global bool
     int x = get_global_id (0);
     
     if(x>0 && y> 0 && x< DIM && y<DIM){ 
-        unsigned  n = 0;
-        unsigned me  = in[table(y,x)] != 0;
+        cell_t  n = 0;
+        cell_t me  = in[table(y,x)] != 0;
 
         n += in[table(y,x)];
         n += in[table(y-1,x)];
@@ -64,8 +64,8 @@ __kernel void life_ocl_hybrid(__global cell_t * in, __global cell_t * out,__glob
     int x = get_global_id (0);
     
     if(x>0 && y> 0 && x< DIM && y<DIM){ 
-        unsigned  n = 0;
-        unsigned me  = in[table(y,x)] != 0;
+        cell_t  n = 0;
+        cell_t me  = in[table(y,x)] != 0;
 
         n += in[table(y,x)];
         n += in[table(y-1,x)];
@@ -82,7 +82,7 @@ __kernel void life_ocl_hybrid(__global cell_t * in, __global cell_t * out,__glob
         if (n != me)
             *change = 1;
         
-        out[table(y,x)]=1;
+        out[table(y,x)]=n;
     }
 }
 

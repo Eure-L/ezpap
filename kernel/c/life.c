@@ -47,7 +47,7 @@ static unsigned gpu_y_part;
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
 {
   //added empty border for optimized structure for AVX usage
-  return i + (y+1) * (DIM+VEC_SIZE*2) + (x + VEC_SIZE);
+  return i + (y) * (DIM) + (x );
 }
 
 static inline cell_t *table_cell_row (cell_t *restrict i, int y, int x)
@@ -147,7 +147,7 @@ static inline unsigned getBitCellRow(int i, int j){
 // This function is called whenever the graphical window needs to be refreshed
 void life_refresh_img (void)
 {
-  printf("refresh\n");
+  //printf("refresh\n");
   for (int i = 0; i < DIM; i++)
     for (int j = 0; j < DIM; j++)
       cur_img (i, j) = cur_table (i, j) * color;
@@ -179,7 +179,7 @@ void life_refresh_img_ocl_hybrid (void){
   printf("refresh_img_ocl_hybrid\n");
 
   cl_int err;
-  err = clEnqueueReadBuffer (queue, cur_buffer, CL_TRUE, 0, _table_SIZE, _table+cpu_y_part*DIM, 0, NULL, NULL);
+  err = clEnqueueReadBuffer (queue, cur_buffer, CL_TRUE, 0, _table_SIZE-(cpu_y_part*DIM), _table+cpu_y_part*DIM, 0, NULL, NULL);
   check (err, "Failed to read buffer from GPU");
   life_refresh_img();
 
@@ -922,10 +922,11 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
   for (unsigned it = 1; it <= nb_iter; it++) {
     gpuChange = False;
     err = 0;
-    // Modifies the buffer
+    // sets gpuChange status into GPU memory
     err =clEnqueueWriteBuffer (queue, changeBuffer, CL_TRUE, 0,
              sizeof (unsigned int), &gpuChange, 0, NULL,&kernel_event); 
-    check (err, "Failed to write the buffer");
+    
+    check (err, "Failed to write the Changebuffer");
 
     // Sets Kernel arguments
     err |= clSetKernelArg (compute_kernel, 0,  sizeof (cl_mem), &cur_buffer);
@@ -951,7 +952,7 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
           y=j * TILE_H;
           who = omp_get_thread_num();   
           if(i>0 && i<NB_TILES_X && j>0 && j< NB_TILES_Y)    
-            res = do_tile_vec(x, y , TILE_W, TILE_H, who);
+            res = do_tile(x, y , TILE_W, TILE_H, who);
           else
             res = do_tile(x, y , TILE_W, TILE_H, who);
           threadChange[who] |= res;
@@ -959,9 +960,23 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
         //}
       } 
     }
-    
+
+    if (do_display) {
+    // Send CPU contribution to GPU memory
+    err = clEnqueueWriteBuffer (queue, cur_buffer, CL_TRUE, 0,
+                                DIM * cpu_y_part * sizeof (cell_t), _table, 0,
+                                NULL, &kernel_event);
+    check (err, "Failed to send CPU contribution to the buffer");
+  } else
+    PRINT_DEBUG ('u', "In average, GPU took %.1f%% of the lines\n",
+                 (float)gpu_accumulated_lines * 100 / (DIM * nb_iter));
+
+    // Send cpu contribution to GPU memory
+    //  err =clEnqueueWriteBuffer (queue, cur_buffer, CL_TRUE, 0,
+    //          cpu_y_part*DIM*sizeof(cell_t), _table, 0, NULL,&kernel_event);
+    // check (err, "Failed to send CPU contribution to the buffer");
+
     deleteCurrentBtmp();
-    swap_tables ();
 
     clFinish (queue);
 
@@ -979,16 +994,7 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
 
   clFinish (queue);
 
-  if (do_display) {
-    // Send CPU contribution to GPU memory
-    err = clEnqueueWriteBuffer (queue, cur_buffer, CL_TRUE, 0,
-                                DIM * cpu_y_part * sizeof (unsigned), image, 0,
-                                NULL, &kernel_event);
-    check (err, "Failed to write to buffer");
-  } else
-    PRINT_DEBUG ('u', "In average, GPU took %.1f%% of the lines\n",
-                 (float)gpu_accumulated_lines * 100 / (DIM * nb_iter));
-
+  
   return 0;
 }
 
