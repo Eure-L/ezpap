@@ -959,7 +959,7 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
 
     if (gpu_duration && cpu_duration) {
       if (much_greater_than (gpu_duration, cpu_duration) &&
-          gpu_y_part > TILE_H) {
+          gpu_y_part > TILE_H*2) {
 
         gpu_y_part -= TILE_H;
         cpu_y_part += TILE_H;
@@ -967,7 +967,7 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
         print_load();
       } 
       else if (much_greater_than (cpu_duration, gpu_duration) &&
-                 cpu_y_part > TILE_H) {
+                 cpu_y_part > TILE_H*2) {
         cpu_y_part -= TILE_H;
         gpu_y_part += TILE_H;
         global[1] = gpu_y_part;
