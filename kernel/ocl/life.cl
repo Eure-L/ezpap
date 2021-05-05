@@ -15,7 +15,13 @@ static inline int table_cell ( int y, int x)
     return ((y)* (DIM) + x); 
 }
 
+static inline int table_cell_hybrid ( int y, int x)
+{
+    return (y+1) * (DIM+VEC_SIZE*2) + (x + VEC_SIZE); 
+}
+
 #define table(y, x) (table_cell ((y), (x)))
+#define table_h(y, x) (table_cell_hybrid ((y), (x)))
 
 //returns the index of the word of type cell_t, containing the cell at coordinate x,y
 // static inline cell_t *table_cell_row ( int y, int x)
@@ -65,24 +71,24 @@ __kernel void life_ocl_hybrid(__global cell_t * in, __global cell_t * out,__glob
     
     if(x>0 && y> 0 && x< DIM && y<DIM){ 
         cell_t  n = 0;
-        cell_t me  = in[table(y,x)] != 0;
+        cell_t me  = in[table_h(y,x)] != 0;
 
-        n += in[table(y,x)];
-        n += in[table(y-1,x)];
-        n += in[table(y,x-1)];
-        n += in[table(y-1,x-1)];
-        n += in[table(y+1,x)];
-        n += in[table(y,x+1)];
-        n += in[table(y+1,x+1)];
-        n += in[table(y+1,x-1)];
-        n += in[table(y-1,x+1)];    
+        n += in[table_h(y,x)];
+        n += in[table_h(y-1,x)];
+        n += in[table_h(y,x-1)];
+        n += in[table_h(y-1,x-1)];
+        n += in[table_h(y+1,x)];
+        n += in[table_h(y,x+1)];
+        n += in[table_h(y+1,x+1)];
+        n += in[table_h(y+1,x-1)];
+        n += in[table_h(y-1,x+1)];    
 
         n = (n == 3 + me) | (n == 3);
         
         if (n != me)
             *change = 1;
         
-        out[table(y,x)]=n;
+        out[table_h(y,x)]=n;
     }
 }
 
@@ -99,9 +105,12 @@ __kernel void life_ocl_bits(__global cell_t * in, __global cell_t * out,__global
     
 }
 
-#if 1
+#if 0
+
+// GPU-only version
+
 __kernel void life_update_texture (__global cell_t *cur, __write_only image2d_t tex)
-{
+{   
     int y = get_global_id (1);
     int x = get_global_id (0);
     int2 pos = (int2)(x, y);
@@ -123,17 +132,41 @@ __kernel void life_update_texture (__global cell_t *cur, __write_only image2d_t 
 }
 
 #else
+
+// hybrid version
+
 __kernel void life_update_texture (__global cell_t *cur, __write_only image2d_t tex)
 {
     int y = get_global_id (1);
     int x = get_global_id (0);
     int2 pos = (int2)(x, y);
-    unsigned c = ((cur[y * DIM + x/bits])>> x%bits) & 0x01;
-    printf("%d", cur[y * DIM + x/bits]);
+    
+    unsigned color = cur [(y+1) * (DIM+VEC_SIZE*2) + (x + VEC_SIZE)];
 
-    c = rgba(R*c, G*c, B*c, 0xFF);
+    write_imagef (tex, (int2)(x, y), color_scatter (color*0xFFFF00FF));
 
-    write_imagef (tex, pos, color_scatter (c));
+    // int y = get_global_id (1);
+    // int x = get_global_id (0);
+    // int2 pos = (int2)(x, y);
+    // unsigned c = cur [y * DIM + x];
+
+    // c = rgba(R*c, G*c, B*c, 0xFF);
+
+    // write_imagef (tex, pos, color_scatter (c));
 }
+
+// #else
+// __kernel void life_update_texture (__global cell_t *cur, __write_only image2d_t tex)
+// {
+//     int y = get_global_id (1);
+//     int x = get_global_id (0);
+//     int2 pos = (int2)(x, y);
+//     unsigned c = ((cur[y * DIM + x/bits])>> x%bits) & 0x01;
+//     printf("%d", cur[y * DIM + x/bits]);
+
+//     c = rgba(R*c, G*c, B*c, 0xFF);
+
+//     write_imagef (tex, pos, color_scatter (c));
+// }
 
 #endif
