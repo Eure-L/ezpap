@@ -898,7 +898,7 @@ static int much_greater_than (long t1, long t2)
 
 void life_init_ocl_hybrid(void){
   printf("init ocl_hybrids\n");
-
+  
   bits = sizeof(cell_t)*8;
   SIZEX =(DIM);
   SIZEY =(DIM);
@@ -934,7 +934,7 @@ void life_init_ocl_hybrid(void){
   ENABLE_BITCELL = 0;
 
   if (GPU_TILE_H != TILE_H)
-  exit_with_error ("CPU and GPU Tiles should have the same height (%d != %d)",
+    exit_with_error ("CPU and GPU Tiles should have the same height (%d != %d)",
                     GPU_TILE_H, TILE_H);
 
   cpu_y_part = (NB_TILES_Y / 2) * GPU_TILE_H; // Start with fifty-fifty
@@ -977,6 +977,7 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
 
     gpuChange = False;
     err = 0;
+
     // sets gpuChange status into GPU memory
     err =clEnqueueWriteBuffer (queue, changeBuffer, CL_TRUE, 0,
              sizeof (unsigned int), &gpuChange, 0, NULL,&kernel_event); 
@@ -1041,7 +1042,7 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
       ocl_monitor (transfert_event, 0, 0, DIM, cpu_y_part-1, TASK_TYPE_WRITE);
     }
     err = clEnqueueWriteBuffer (queue, next_buffer, CL_TRUE, 
-                                DIM * (cpu_y_part)  * sizeof (cell_t),      //offset
+                                DIM * (cpu_y_part-1)  * sizeof (cell_t),      //offset
                                 DIM * sizeof (cell_t),                      //size
                                 _alternate_table + (DIM * (cpu_y_part-1)),  //pointer
                                 0,
