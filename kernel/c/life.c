@@ -560,12 +560,7 @@ static int do_tile_vec (int x, int y, int width, int height, int who)
   int r;
 
   monitoring_start_tile (who);
-
-  // if(x==0 || y==0 || x== DIM-width || y == DIM-height)
-  //   r = do_tile_reg(x, y, width, height);
-  // else
-    r = do_tile_reg_vec (x, y, width, height);
-
+  r = do_tile_reg_vec (x, y, width, height);
   monitoring_end_tile (x, y, width, height, who);
 
   return r;
@@ -714,10 +709,7 @@ unsigned life_compute_lazybtmpvec (unsigned nb_iter){
           x=i * TILE_W;
           y=j * TILE_H;
           who = omp_get_thread_num();
-          if(i>0 && i<NB_TILES_X && j>0 && j< NB_TILES_Y)
-            res = do_tile_vec(x, y , TILE_W, TILE_H, who);
-          else
-            res = do_tile(x, y , TILE_W, TILE_H, who);
+          res = do_tile_vec(x, y , TILE_W, TILE_H, who);
           
           threadChange[omp_get_thread_num()] |= res;
           *next_mapAddr(i,j)=res;      
@@ -1071,12 +1063,12 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     err = clEnqueueReadBuffer(queue, changeBuffer, CL_TRUE, 0, sizeof(unsigned),
           &gpuChange, 0, NULL, &kernel_event);
     check (err, "Failed to Read the buffer");
-    clFinish (queue);
+    //clFinish (queue);
     
 
     swap_buffers();
     swap_tables();
-    clReleaseEvent (kernel_event);
+    //clReleaseEvent (kernel_event);
 
     if(!gpuChange && !hasAnyTileChanged())
       return it;
