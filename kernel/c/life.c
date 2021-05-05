@@ -41,8 +41,14 @@ unsigned SIZEY ;
 #define DIMTOT (SIZEX*SIZEY)
 
 cl_mem changeBuffer;
+cl_mem curbitMapBuffer;
+cl_mem nextbitMapBuffer;
+cl_event transfert_event;
+
 static unsigned cpu_y_part;
 static unsigned gpu_y_part;
+// Threashold = 10%
+#define THRESHOLD 10
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
 {
@@ -82,7 +88,9 @@ static inline char *fake_map (char * i, int x, int y)
 #define next_table_row(y, x) (*table_cell_row (_alternate_table, (y), (x)))
 
 #define next_map(x, y) (*table_map ((bitMapTls+(nextTable*NB_FAKE_TILES)), (x), (y)))
+#define next_fmap(x, y) (*fake_map ((bitMapTls+(nextTable*NB_FAKE_TILES)), (x), (y)))
 #define next_mapAddr(x, y) (table_map ((bitMapTls+(nextTable*NB_FAKE_TILES)), (x), (y)))
+#define next_fmapAddr(x, y) (fake_map ((bitMapTls+(nextTable*NB_FAKE_TILES)), (x), (y)))
 
 #define right 1
 #define left 2
@@ -155,13 +163,13 @@ void life_refresh_img (void)
 
 void life_refresh_img_gottagofast (void)
 {
-  printf("refresh gottagofast\n");
+  //printf("refresh gottagofast\n");
   for (int i = 0; i < DIM; i++){
     for (int j = 0; j < DIM; j++){
         cur_img (i, j) = (getBitCellRow (j, i) )* color; 
     }
   }
-  printf("end refresh gottagofast\n");
+  //printf("end refresh gottagofast\n");
 }
 
 void life_refresh_img_ocl_bits (void){
@@ -176,7 +184,7 @@ void life_refresh_img_ocl_bits (void){
 }
 
 void life_refresh_img_ocl_hybrid (void){
-  printf("refresh_img_ocl_hybrid\n");
+  //printf("refresh_img_ocl_hybrid\n");
 
   cl_int err;
   unsigned offset =  cpu_y_part * DIM;
@@ -186,7 +194,7 @@ void life_refresh_img_ocl_hybrid (void){
   check (err, "Failed to read buffer from GPU");
   life_refresh_img();
 
-  printf("end refresh_img_ocl_hybrid\n");
+  //printf("end refresh_img_ocl_hybrid\n");
 }
 
 
@@ -245,6 +253,14 @@ void deleteCurrentBtmp(){
     }
   }
   #endif
+}
+
+void setGPUborderBtmp(){
+  int j=cpu_y_part/TILE_H;
+  for(int i = 0; i<NB_FAKE_X; i++){
+    next_fmap(i,j)=1;
+  }
+  
 }
 
 unsigned tilePosition(int i, int j){
@@ -546,7 +562,10 @@ static int do_tile_vec (int x, int y, int width, int height, int who)
 
   monitoring_start_tile (who);
 
-  r = do_tile_reg_vec (x, y, width, height);
+  if(x==0 || y==0 || x== DIM-width || y == DIM-height)
+    r = do_tile_reg(x, y, width, height);
+  else
+    r = do_tile_reg_vec (x, y, width, height);
 
   monitoring_end_tile (x, y, width, height, who);
 
@@ -688,22 +707,21 @@ unsigned life_compute_lazybtmpvec (unsigned nb_iter){
 
   for(unsigned it=1; it<=nb_iter;it++){
 
-    #pragma omp parallel for schedule(static) private(res,x,y,who)
-    for(int j = 0; j< NB_TILES_Y * xgrain ;j++){ 
-      for(int i = 0; i< (NB_TILES_X/xgrain)  ;i++){
-        int column = j/NB_TILES_Y;
-        int jj = j%NB_TILES_Y;
-        int ii = column * (NB_TILES_X/xgrain) + i;
+    #pragma omp parallel for schedule(dynamic) private(res,x,y,who)
+    for(int j = 0; j< NB_TILES_Y ;j++){ 
+      for(int i = 0; i< NB_FAKE_X  ;i++){
 
-        if(hasNeighbourChanged(ii,jj)){
-          x=ii * TILE_W;
-          y=jj * TILE_H;
+        if(hasNeighbourChanged(i,j)){
+          x=i * TILE_W;
+          y=j * TILE_H;
           who = omp_get_thread_num();
-          
-          res = do_tile_vec(x, y , TILE_W, TILE_H, who);
+          if(i>0 && i<NB_TILES_X && j>0 && j< NB_TILES_Y)
+            res = do_tile_vec(x, y , TILE_W, TILE_H, who);
+          else
+            res = do_tile(x, y , TILE_W, TILE_H, who);
           
           threadChange[omp_get_thread_num()] |= res;
-          *next_mapAddr(ii,jj)=res;      
+          *next_mapAddr(i,j)=res;      
         }
       } 
     }
@@ -748,7 +766,11 @@ unsigned life_compute_gottagofast(unsigned nb_iter)
 }
 
 static inline void swap_buffers(void)
-{
+{ 
+  cl_mem tmp1 = curbitMapBuffer;
+  curbitMapBuffer = nextbitMapBuffer;
+  nextbitMapBuffer = tmp1;
+
   cl_mem tmp2  = cur_buffer;
   cur_buffer = next_buffer;
   next_buffer = tmp2;
@@ -865,9 +887,14 @@ unsigned life_invoke_ocl_bits(unsigned nb_iter){
 }
 
 
-static unsigned cpu_y_part;
-static unsigned gpu_y_part;
 
+static long gpu_duration = 0, cpu_duration = 0;
+
+
+static int much_greater_than (long t1, long t2)
+{
+  return (t1 > t2) && ((t1 - t2) * 100 / t1 > THRESHOLD);
+}
 
 void life_init_ocl_hybrid(void){
   printf("init ocl_hybrids\n");
@@ -890,6 +917,16 @@ void life_init_ocl_hybrid(void){
   
   changeBuffer = clCreateBuffer (context, CL_MEM_READ_WRITE,
                             sizeof (unsigned), NULL, NULL);
+  // curbitMapBuffer =  clCreateBuffer (context, CL_MEM_READ_WRITE,
+  //                           NB_FAKE_TILES * sizeof(char), NULL, NULL);
+  // nextbitMapBuffer =  clCreateBuffer (context, CL_MEM_READ_WRITE,
+  //                           NB_FAKE_TILES * sizeof(char), NULL, NULL);
+
+  // cl_int err =clEnqueueWriteBuffer (queue, curbitMapBuffer, CL_TRUE, 0,
+  //            NB_FAKE_TILES * sizeof(char), cur_fmapAddr(0,0), 0, NULL,NULL); 
+  // err = clEnqueueWriteBuffer (queue, nextbitMapBuffer, CL_TRUE, 0,
+  //            NB_FAKE_TILES * sizeof(char), next_fmapAddr(0,0), 0, NULL,NULL);
+  //check (err, "Failed to write the bitmapbuffer");
 
   printf("end ocl_hybrid\n");
   zero = _mm256_setzero_si256(); 
@@ -912,23 +949,37 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
   size_t global[2] = {DIM, gpu_y_part};
   cl_int err;
   cl_event kernel_event;
-  int gpu_accumulated_lines = 0;
 
   //CPU VARIABLES
   unsigned x;
   unsigned y;
   unsigned who;
   unsigned res;
-
+  long t1,t2;
   bool gpuChange = False;
 
   for (unsigned it = 1; it <= nb_iter; it++) {
+    
+    //Load balancing
+    // if (gpu_duration) {
+    //   if (much_greater_than (gpu_duration, cpu_duration) &&
+    //       gpu_y_part > GPU_TILE_H) {
+    //     gpu_y_part -= GPU_TILE_H;
+    //     cpu_y_part += GPU_TILE_H;
+    //     global[1] = gpu_y_part;
+    //   } else if (much_greater_than (cpu_duration, gpu_duration) &&
+    //              cpu_y_part > GPU_TILE_H) {
+    //     cpu_y_part -= GPU_TILE_H;
+    //     gpu_y_part += GPU_TILE_H;
+    //     global[1] = gpu_y_part;
+    //   }
+    // }
+
     gpuChange = False;
     err = 0;
     // sets gpuChange status into GPU memory
     err =clEnqueueWriteBuffer (queue, changeBuffer, CL_TRUE, 0,
              sizeof (unsigned int), &gpuChange, 0, NULL,&kernel_event); 
-    
     check (err, "Failed to write the Changebuffer");
 
     // Sets Kernel arguments
@@ -936,8 +987,9 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     err |= clSetKernelArg (compute_kernel, 1,  sizeof (cl_mem), &next_buffer);
     err |= clSetKernelArg (compute_kernel, 2,  sizeof (cl_mem), &changeBuffer);
     check (err, "Failed to set kernel arguments");
-    err |= clSetKernelArg (compute_kernel, 3, sizeof (unsigned), &gpu_y_part);
-    err |= clSetKernelArg (compute_kernel, 4, sizeof (unsigned), &cpu_y_part);
+    err |= clSetKernelArg (compute_kernel, 3, sizeof (unsigned), &cpu_y_part);
+    // err |= clSetKernelArg (compute_kernel, 5,  sizeof (cl_mem), &curbitMapBuffer);
+    // err |= clSetKernelArg (compute_kernel, 6,  sizeof (cl_mem), &nextbitMapBuffer);
     check (err, "Failed to set kernel arguments");
 
     // Launches GPU kernel
@@ -946,46 +998,71 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     check (err, "Failed to execute kernel");
     clFlush (queue);
 
-    //CPU version
+    /////// CPU part
+    t1 = what_time_is_it ();
+    //lower part of the CPU part
     #pragma omp parallel for schedule(dynamic) private(res,x,y,who)
     for(int j = 0; j< cpu_y_part/TILE_H  ;j++){ 
       for(int i = 0; i< NB_TILES_X  ;i++){
-        //if(hasNeighbourChanged(i,j)){
+        if(hasNeighbourChanged(i,j)){
           x=i * TILE_W;
           y=j * TILE_H;
           who = omp_get_thread_num();   
-          if(i>0 && i<NB_TILES_X && j>0 && j< NB_TILES_Y)    
-            res = do_tile_vec(x, y , TILE_W, TILE_H, who);
-          else
-            res = do_tile(x, y , TILE_W, TILE_H, who);
+          res = do_tile_vec(x, y , TILE_W, TILE_H, who);
           threadChange[who] |= res;
-          *next_mapAddr(i,j)=res;      
-        //}
+          *next_mapAddr(i,j)=res;
+        }
       } 
     }
+    t2           = what_time_is_it ();
+    cpu_duration = t2 - t1;
+    //printf("bite2\n");
 
+    //  GPU monitoring 
+    gpu_duration = ocl_monitor (kernel_event, 0, cpu_y_part, global[0],
+                                global[1], TASK_TYPE_COMPUTE);
+    //clReleaseEvent (kernel_event);
+    //clearing current map for next itteration
+    deleteCurrentBtmp();
+    setGPUborderBtmp();
     // CPU waiting for the GPU to finish
     clFinish (queue);
 
     //////// Workshare CPU - GPU contribution
-    //  Send CPU contribution to GPU memory
-    err = clEnqueueWriteBuffer (queue, next_buffer, CL_TRUE, 0,
-                                DIM * cpu_y_part * sizeof (cell_t), _alternate_table, 0,
-                                NULL, &kernel_event);
+    //  Send the whole CPU contribution to GPU memory to get a texture render
+    //  (only if it has to be displayed, takes a lot of time to transfer data)
+    if(do_display){
+      err = clEnqueueWriteBuffer (queue, next_buffer, CL_TRUE, 
+                                  0,                                      //offset
+                                  DIM * (cpu_y_part-1)  * sizeof (cell_t),  //size
+                                  _alternate_table,                       //pointer
+                                  0,
+                                  NULL, &transfert_event);
+      ocl_monitor (transfert_event, 0, 0, DIM, cpu_y_part-1, TASK_TYPE_WRITE);
+    }
+    err = clEnqueueWriteBuffer (queue, next_buffer, CL_TRUE, 
+                                DIM * (cpu_y_part)  * sizeof (cell_t),      //offset
+                                DIM * sizeof (cell_t),                      //size
+                                _alternate_table + (DIM * (cpu_y_part-1)),  //pointer
+                                0,
+                                NULL, &transfert_event);
+    ocl_monitor (transfert_event, 0, (cpu_y_part-1), DIM, 1, TASK_TYPE_WRITE);
+
     //  Send GPU border line contribution to RAM
     check (err, "Failed to send CPU contribution to the buffer");
-    err = clEnqueueReadBuffer (queue, next_buffer, CL_TRUE, cpu_y_part * DIM * sizeof(cell_t),
-                                DIM * sizeof (cell_t),
-                                 _alternate_table + (DIM * cpu_y_part) ,
-                                  0, NULL, &kernel_event);
-    check (err, "Failed to send GPU contribution to the RAM");
+    err = clEnqueueReadBuffer (queue, next_buffer, CL_TRUE, 
+                                cpu_y_part * DIM * sizeof(cell_t),      //offset
+                                DIM * sizeof (cell_t),                  //size
+                                _alternate_table + (DIM * cpu_y_part),  //pointer
+                                  0, NULL, &transfert_event);
+    ocl_monitor (transfert_event, 0, cpu_y_part, DIM, 1, TASK_TYPE_READ);
+    check (err, "Failed to send GPU contribution to the RAM");    
 
     // Retrieves the GpuChangeBuffer
     err = clEnqueueReadBuffer(queue, changeBuffer, CL_TRUE, 0, sizeof(unsigned),
           &gpuChange, 0, NULL, &kernel_event);
     check (err, "Failed to Read the buffer");
 
-    deleteCurrentBtmp();
     swap_buffers();
     swap_tables();
 

@@ -59,7 +59,7 @@ __kernel void life_ocl(__global cell_t * in, __global cell_t * out,__global bool
 }
 
 __kernel void life_ocl_hybrid(__global cell_t * in, __global cell_t * out,__global bool * change,
-                                 unsigned  gpu_y_part,  unsigned  cpu_y_part){
+                                unsigned  cpu_y_part){
     int y = get_global_id (1) + cpu_y_part;
     int x = get_global_id (0);
     
