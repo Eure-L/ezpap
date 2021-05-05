@@ -895,6 +895,11 @@ static int much_greater_than (long t1, long t2)
   return (t1 > t2) && ((t1 - t2) * 100 / t1 > THRESHOLD);
 }
 
+static inline void print_load(void){
+  if(!do_display)
+    printf("==> CPU %.2f%% load / GPU %.2f%% load \n",(float)cpu_y_part/DIM*100,(float)gpu_y_part/DIM*100);
+}
+
 void life_init_ocl_hybrid(void){
   printf("init ocl_hybrids\n");
   
@@ -967,14 +972,14 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
         gpu_y_part -= TILE_H;
         cpu_y_part += TILE_H;
         global[1] = gpu_y_part;
-        printf("cpu is stealing!!!!!\n");
+        print_load();
       } 
       else if (much_greater_than (cpu_duration, gpu_duration) &&
                  cpu_y_part > TILE_H) {
         cpu_y_part -= TILE_H;
         gpu_y_part += TILE_H;
         global[1] = gpu_y_part;
-        printf("gpu is stealing!!!!!\n");
+        print_load();
 
       }
     }
@@ -1042,12 +1047,12 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
       check (err, "Failed to send (the whole) CPU contribution to the buffer");
     }else{
       err = clEnqueueWriteBuffer (queue, next_buffer, CL_TRUE, 
-                                  SIZEX * (cpu_y_part+1 - TILE_H*2),                                        //offset write buffer
-                                  SIZEX * TILE_H*2 * sizeof (cell_t), //size //+1 because of border
-                                  _alternate_table +  SIZEX * (cpu_y_part+1 - TILE_H*2) ,                        //pointer
+                                  SIZEX * (cpu_y_part+1 - TILE_H*2),                        //offset write buffer
+                                  SIZEX * TILE_H*2 * sizeof (cell_t),                       //size  because of border
+                                  _alternate_table +  SIZEX * (cpu_y_part+1 - TILE_H*2) ,   //pointer
                                   0,
                                   NULL, &transfert_event);
-      ocl_monitor (transfert_event, 0, (cpu_y_part+TILE_H-1), DIM, TILE_H, TASK_TYPE_WRITE);
+      ocl_monitor (transfert_event, 0, (cpu_y_part+TILE_H*2-1), DIM, TILE_H*2, TASK_TYPE_WRITE);
       check (err, "Failed to send (part of) CPU contribution to the buffer");
     }
 
@@ -1061,11 +1066,13 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     check (err, "Failed to send GPU bordering tiles contribution to the RAM");
 
 
-    clFinish (queue);
+    
     // Retrieves the GpuChangeBuffer
     err = clEnqueueReadBuffer(queue, changeBuffer, CL_TRUE, 0, sizeof(unsigned),
           &gpuChange, 0, NULL, &kernel_event);
     check (err, "Failed to Read the buffer");
+    clFinish (queue);
+    
 
     swap_buffers();
     swap_tables();
