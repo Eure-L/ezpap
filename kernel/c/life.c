@@ -47,7 +47,7 @@ cl_event transfert_event;
 
 static unsigned cpu_y_part;
 static unsigned gpu_y_part;
-// Threashold = 10%
+// Threashold
 #define THRESHOLD 10
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
@@ -942,11 +942,11 @@ void life_init_ocl_hybrid(void){
 
 }
 
-
 unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
 {
   //GPU VARIABLES
   size_t global[2] = {DIM, gpu_y_part};
+  size_t local[2]  = {GPU_TILE_W, GPU_TILE_H};
   cl_int err;
   cl_event kernel_event;
 
@@ -959,21 +959,22 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
   bool gpuChange = False;
 
   for (unsigned it = 1; it <= nb_iter; it++) {
-    
     //Load balancing
-    // if (gpu_duration) {
-    //   if (much_greater_than (gpu_duration, cpu_duration) &&
-    //       gpu_y_part > GPU_TILE_H) {
-    //     gpu_y_part -= GPU_TILE_H;
-    //     cpu_y_part += GPU_TILE_H;
-    //     global[1] = gpu_y_part;
-    //   } else if (much_greater_than (cpu_duration, gpu_duration) &&
-    //              cpu_y_part > GPU_TILE_H) {
-    //     cpu_y_part -= GPU_TILE_H;
-    //     gpu_y_part += GPU_TILE_H;
-    //     global[1] = gpu_y_part;
-    //   }
-    // }
+    if (gpu_duration && cpu_duration) {
+      if (much_greater_than (gpu_duration, cpu_duration) &&
+          gpu_y_part > TILE_H) {
+
+        gpu_y_part -= TILE_H;
+        cpu_y_part += TILE_H;
+        global[1] = gpu_y_part;
+
+      } else if (much_greater_than (cpu_duration, gpu_duration) &&
+                 cpu_y_part > TILE_H) {
+        cpu_y_part -= TILE_H;
+        gpu_y_part += TILE_H;
+        global[1] = gpu_y_part;
+      }
+    }
 
     gpuChange = False;
     err = 0;
@@ -992,9 +993,8 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     // err |= clSetKernelArg (compute_kernel, 5,  sizeof (cl_mem), &curbitMapBuffer);
     // err |= clSetKernelArg (compute_kernel, 6,  sizeof (cl_mem), &nextbitMapBuffer);
     check (err, "Failed to set kernel arguments");
-
     // Launches GPU kernel
-    err = clEnqueueNDRangeKernel (queue, compute_kernel, 2, NULL, global, NULL,
+    err = clEnqueueNDRangeKernel (queue, compute_kernel, 2, NULL, global, local,
                                   0, NULL, &kernel_event);
     check (err, "Failed to execute kernel");
     clFlush (queue);
@@ -1017,8 +1017,6 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     }
     t2           = what_time_is_it ();
     cpu_duration = t2 - t1;
-    //printf("bite2\n");
-
     //  GPU monitoring 
     gpu_duration = ocl_monitor (kernel_event, 0, cpu_y_part, global[0],
                                 global[1], TASK_TYPE_COMPUTE);
@@ -1035,7 +1033,7 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     if(do_display){
       err = clEnqueueWriteBuffer (queue, next_buffer, CL_TRUE, 
                                   0,                                      //offset
-                                  DIM * (cpu_y_part-1)  * sizeof (cell_t),  //size
+                                  DIM * (cpu_y_part-1)  * sizeof (cell_t), //size
                                   _alternate_table,                       //pointer
                                   0,
                                   NULL, &transfert_event);
@@ -1048,7 +1046,6 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
                                 0,
                                 NULL, &transfert_event);
     ocl_monitor (transfert_event, 0, (cpu_y_part-1), DIM, 1, TASK_TYPE_WRITE);
-
     //  Send GPU border line contribution to RAM
     check (err, "Failed to send CPU contribution to the buffer");
     err = clEnqueueReadBuffer (queue, next_buffer, CL_TRUE, 
@@ -1063,17 +1060,12 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     err = clEnqueueReadBuffer(queue, changeBuffer, CL_TRUE, 0, sizeof(unsigned),
           &gpuChange, 0, NULL, &kernel_event);
     check (err, "Failed to Read the buffer");
-
     swap_buffers();
     swap_tables();
-
     if(!gpuChange && !hasAnyTileChanged())
       return it;
   }
-
-  clFinish (queue);
-
-  
+  //clFinish (queue);
   return 0;
 }
 
