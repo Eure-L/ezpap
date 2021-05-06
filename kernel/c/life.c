@@ -892,6 +892,24 @@ static inline void print_load(void){
     printf("==> CPU %.2f%% load / GPU %.2f%% load \n",(float)cpu_y_part/DIM*100,(float)gpu_y_part/DIM*100);
 }
 
+static cl_int nqWrtBuf(unsigned offset, unsigned size, cl_mem * buffer, cell_t * table){
+  return clEnqueueWriteBuffer (queue, *buffer, CL_TRUE, 
+                                  offset,                 //offset write buffer
+                                  size,                   //size 
+                                  table + offset,         //pointer
+                                  0,
+                                  NULL, &transfert_event);
+}
+
+static cl_int nqRdBuf(unsigned offset, unsigned size, cl_mem * buffer, cell_t * table){
+  return clEnqueueReadBuffer (queue, *buffer, CL_TRUE, 
+                                  offset,                 //offset 
+                                  size,                   //size 
+                                  table + offset,         //pointer
+                                  0,
+                                  NULL, &transfert_event);
+}
+
 void life_init_ocl_hybrid(void){
   printf("init ocl_hybrids\n");
   
@@ -940,6 +958,9 @@ void life_init_ocl_hybrid(void){
 
 unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
 {
+  unsigned offset;
+  unsigned data_size;
+  bool gpu_steal,cpu_steal;
   //GPU VARIABLES
   size_t global[2] = {DIM, gpu_y_part};
   size_t local[2]  = {GPU_TILE_W, GPU_TILE_H};
@@ -955,8 +976,13 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
   bool gpuChange = False;
 
   for (unsigned it = 1; it <= nb_iter; it++) {
-    //Load balancing
+    gpu_steal = false;
+    cpu_steal = false;
+    gpuChange = False;
+    err = 0;
 
+
+    //Load balancing
     if (gpu_duration && cpu_duration) {
       if (much_greater_than (gpu_duration, cpu_duration) &&
           gpu_y_part > TILE_H*2) {
@@ -965,6 +991,7 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
         cpu_y_part += TILE_H;
         global[1] = gpu_y_part;
         print_load();
+        cpu_steal=true;
       } 
       else if (much_greater_than (cpu_duration, gpu_duration) &&
                  cpu_y_part > TILE_H*2) {
@@ -972,12 +999,9 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
         gpu_y_part += TILE_H;
         global[1] = gpu_y_part;
         print_load();
-
+        gpu_steal = true;
       }
     }
-    
-    gpuChange = False;
-    err = 0;
 
     // sets gpuChange status into GPU memory
     err =clEnqueueWriteBuffer (queue, changeBuffer, CL_TRUE, 0,
@@ -1025,10 +1049,16 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     // CPU waiting for the GPU to finish
     clFinish (queue);
 
+
+    
+
+
     //////// Workshare CPU - GPU contribution
     //  Send the whole CPU contribution to GPU memory to get a texture render
     //  (only if it has to be displayed, takes a lot of time to transfer data)
     if(do_display){
+      data_size = SIZEX * (cpu_y_part+1) * sizeof (cell_t);
+      offset = 0;
       err = clEnqueueWriteBuffer (queue, next_buffer, CL_TRUE, 
                                   0,                                        //offset write buffer
                                   SIZEX * (cpu_y_part+1) * sizeof (cell_t), //size //+1 because of border
@@ -1063,7 +1093,7 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     err = clEnqueueReadBuffer(queue, changeBuffer, CL_TRUE, 0, sizeof(unsigned),
           &gpuChange, 0, NULL, &kernel_event);
     check (err, "Failed to Read the buffer");
-    //clFinish (queue);
+    clFinish (queue);
     
 
     swap_buffers();
