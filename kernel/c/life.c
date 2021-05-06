@@ -48,7 +48,7 @@ cl_event transfert_event;
 static unsigned cpu_y_part;
 static unsigned gpu_y_part;
 // Threashold
-#define THRESHOLD 10
+#define THRESHOLD 5
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
 {
@@ -892,20 +892,20 @@ static inline void print_load(void){
     printf("==> CPU %.2f%% load / GPU %.2f%% load \n",(float)cpu_y_part/DIM*100,(float)gpu_y_part/DIM*100);
 }
 
-static cl_int nqWrtBuf(unsigned offset, unsigned size, cl_mem * buffer, cell_t * table){
+static cl_int nqWrtBuf(unsigned offset, unsigned size, cl_mem * buffer, cell_t * ptr){
   return clEnqueueWriteBuffer (queue, *buffer, CL_TRUE, 
                                   offset,                 //offset write buffer
                                   size,                   //size 
-                                  table + offset,         //pointer
+                                  ptr,                    //pointer
                                   0,
                                   NULL, &transfert_event);
 }
 
-static cl_int nqRdBuf(unsigned offset, unsigned size, cl_mem * buffer, cell_t * table){
+static cl_int nqRdBuf(unsigned offset, unsigned size, cl_mem * buffer, cell_t * ptr){
   return clEnqueueReadBuffer (queue, *buffer, CL_TRUE, 
                                   offset,                 //offset 
                                   size,                   //size 
-                                  table + offset,         //pointer
+                                  ptr,                    //pointer
                                   0,
                                   NULL, &transfert_event);
 }
@@ -958,9 +958,11 @@ void life_init_ocl_hybrid(void){
 
 unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
 {
+  cell_t * ptr;
   unsigned offset;
   unsigned data_size;
   bool gpu_steal,cpu_steal;
+
   //GPU VARIABLES
   size_t global[2] = {DIM, gpu_y_part};
   size_t local[2]  = {GPU_TILE_W, GPU_TILE_H};
@@ -1059,33 +1061,30 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     if(do_display){
       data_size = SIZEX * (cpu_y_part+1) * sizeof (cell_t);
       offset = 0;
-      err = clEnqueueWriteBuffer (queue, next_buffer, CL_TRUE, 
-                                  0,                                        //offset write buffer
-                                  SIZEX * (cpu_y_part+1) * sizeof (cell_t), //size //+1 because of border
-                                  _alternate_table ,                        //pointer
-                                  0,
-                                  NULL, &transfert_event);
-      ocl_monitor (transfert_event, 0, 0, DIM, cpu_y_part+1, TASK_TYPE_WRITE);
-      check (err, "Failed to send (the whole) CPU contribution to the buffer");
+      ptr = _alternate_table + offset;
+        
+        err = nqWrtBuf(offset,  data_size, &next_buffer, ptr);
+        ocl_monitor (transfert_event, 0, 0, DIM, cpu_y_part+1, TASK_TYPE_WRITE);
+        check (err, "Failed to send (the whole) CPU contribution to the buffer");
+
     }else{
-      err = clEnqueueWriteBuffer (queue, next_buffer, CL_TRUE, 
-                                  SIZEX * (cpu_y_part+1 - TILE_H*2),                        //offset write buffer
-                                  SIZEX * TILE_H*2 * sizeof (cell_t),                       //size  because of border
-                                  _alternate_table +  SIZEX * (cpu_y_part+1 - TILE_H*2) ,   //pointer
-                                  0,
-                                  NULL, &transfert_event);
-      ocl_monitor (transfert_event, 0, (cpu_y_part+TILE_H*2-1), DIM, TILE_H*2, TASK_TYPE_WRITE);
-      check (err, "Failed to send (part of) CPU contribution to the buffer");
+      data_size = SIZEX * TILE_H*2 * sizeof (cell_t);
+      offset = SIZEX * (cpu_y_part+1 - TILE_H*2);
+      ptr = _alternate_table + offset;
+        
+        err = nqWrtBuf(offset,  data_size, &next_buffer, ptr);
+        ocl_monitor (transfert_event, 0, (cpu_y_part+TILE_H*2-1), DIM, TILE_H*2, TASK_TYPE_WRITE);
+        check (err, "Failed to send (part of) CPU contribution to the buffer");
     }
 
     //  Send GPU border TILES contribution to RAM
-    err = clEnqueueReadBuffer (queue, next_buffer, CL_TRUE, 
-                                SIZEX * (cpu_y_part+1) * sizeof (cell_t),                     //offset read buffer
-                                SIZEX * TILE_H*2 * sizeof (cell_t),                           //size
-                                _alternate_table + SIZEX * (cpu_y_part+1) * sizeof (cell_t),  //pointer//+1 because of border
-                                  0, NULL, &transfert_event);
-    ocl_monitor (transfert_event, 0, cpu_y_part, DIM, TILE_H*2, TASK_TYPE_READ);
-    check (err, "Failed to send GPU bordering tiles contribution to the RAM");
+    data_size = SIZEX * TILE_H*2 * sizeof (cell_t);
+    offset = SIZEX * (cpu_y_part+1);
+    ptr = _alternate_table + SIZEX * (cpu_y_part+1) * sizeof (cell_t);
+      err = nqRdBuf(offset,  data_size, &next_buffer, ptr);
+      ocl_monitor (transfert_event, 0, cpu_y_part, DIM, TILE_H*2, TASK_TYPE_READ);
+      check (err, "Failed to send GPU bordering tiles contribution to the RAM");
+
 
 
     
