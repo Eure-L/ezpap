@@ -941,7 +941,6 @@ static void do_statusQuo(){
 
   //  CPU_PART
   if((!do_display)){
-    //printf("no display\n");
     err = nqWrtBuf(offset,  data_size, &next_buffer, ptr);
     ocl_monitor (transfert_event, 0, cpu_y_part-rows, DIM, rows, TASK_TYPE_WRITE);
     check (err, "Failed to send (part of) CPU contribution to the buffer");
@@ -971,8 +970,6 @@ static void gpu_steals_load(){
   }else{
     cpu_write_all();
   }
-  //print_load();
-  //printf("GPU steals Load\n");
 }
 
 static void cpu_steals_load(){
@@ -990,11 +987,6 @@ static void cpu_steals_load(){
   if(do_display){
     cpu_write_all();
   }
-
-  // after transfering data we adapt loads
-
-  //print_load();
-  //printf("CPU steals Load\n");
 }
 
 void life_init_ocl_hybrid(void){
@@ -1019,18 +1011,6 @@ void life_init_ocl_hybrid(void){
   changeBuffer = clCreateBuffer (context, CL_MEM_READ_WRITE,
                             sizeof (unsigned), NULL, NULL);
 
- 
-  // curbitMapBuffer =  clCreateBuffer (context, CL_MEM_READ_WRITE,
-  //                           NB_FAKE_TILES * sizeof(char), NULL, NULL);
-  // nextbitMapBuffer =  clCreateBuffer (context, CL_MEM_READ_WRITE,
-  //                           NB_FAKE_TILES * sizeof(char), NULL, NULL);
-  // cl_int err =clEnqueueWriteBuffer (queue, curbitMapBuffer, CL_TRUE, 0,
-  //            NB_FAKE_TILES * sizeof(char), cur_fmapAddr(0,0), 0, NULL,NULL);
-  // check (err, "Failed to write the curbitmapbuffer");
-  // err = clEnqueueWriteBuffer (queue, nextbitMapBuffer, CL_TRUE, 0,
-  //            NB_FAKE_TILES * sizeof(char), next_fmapAddr(0,0), 0, NULL,NULL);
-  // check (err, "Failed to write the bitmapbuffer");
-
   printf("end ocl_hybrid\n");
   zero = _mm256_setzero_si256(); 
   mask1 = _mm256_set1_epi8(1);
@@ -1047,7 +1027,7 @@ void life_init_ocl_hybrid(void){
 
 unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
 {
-
+  unsigned gpu_accumulated_lines = 0;
   //GPU VARIABLES
   size_t global[2] = {DIM, gpu_y_part};
   size_t local[2]  = {GPU_TILE_W, GPU_TILE_H};
@@ -1106,6 +1086,7 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     gpu_duration = ocl_monitor (kernel_event, 0, cpu_y_part, global[0],
                                 global[1], TASK_TYPE_COMPUTE);
     
+    gpu_accumulated_lines += gpu_y_part;
     // CPU waiting for the GPU to finish
     clFinish (queue);
 
@@ -1140,7 +1121,6 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     err = clEnqueueReadBuffer(queue, changeBuffer, CL_TRUE, 0, sizeof(unsigned),
           &gpuChange, 0, NULL, &kernel_event);
     check (err, "Failed to Read the buffer");    
-    //clFinish (queue);
 
     //clearing current map for next itteration
     deleteCurrentBtmp();
@@ -1148,12 +1128,14 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
 
     swap_buffers();
     swap_tables();
-    //clReleaseEvent (kernel_event);
 
     if(!gpuChange && !hasAnyTileChanged())
       return it;
   }
-  //clFinish (queue);
+
+  PRINT_DEBUG ('u', "In average, GPU took %.1f%% of the lines\n",
+                 (float)gpu_accumulated_lines * 100 / (DIM * nb_iter));
+
   return 0;
 }
 
