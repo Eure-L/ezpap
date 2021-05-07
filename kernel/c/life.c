@@ -175,14 +175,12 @@ void life_refresh_img_gottagofast (void)
 }
 
 void life_refresh_img_ocl_bits (void){
-  printf("refresh_img_ocl_bits\n");
 
   cl_int err;
   err = clEnqueueReadBuffer (queue, cur_buffer, CL_TRUE, 0, _table_SIZE, _table, 0, NULL, NULL);
   check (err, "Failed to read buffer from GPU");
   life_refresh_img_gottagofast();
 
-  printf("end refresh_img_ocl_bits\n");
 }
 
 void life_refresh_img_ocl(void){
@@ -227,7 +225,6 @@ char * initBtmptls(void){
   for (int i=0;i<NB_FAKE_TILES;i++){
     *(map+NB_FAKE_TILES+i)=1;
   }
-  //printf("init a : %d \n",*(map+(NB_TILES_TOT)+i));
   
   return map;
 }
@@ -346,17 +343,14 @@ void life_finalize (void)
 
 void life_init_ocl(void)
 {
-  printf("init ocl\n");
   life_init();
   changeBuffer = clCreateBuffer (context, CL_MEM_READ_WRITE,
                             sizeof (unsigned), NULL, NULL);
 
-  printf("end initocl\n");
 }
 
 void life_init_gottagofast(void)
 {
-  printf("init bitbrdvec\n");
   ENABLE_BITCELL = 2;
   bits = sizeof(cell_t)*8;
   SIZEX =(DIM/bits+(2*(VEC_SIZE)));
@@ -375,11 +369,9 @@ void life_init_gottagofast(void)
     bitMapTls = initBtmptls(); 
   
   clear_table(_table);
-  printf("end init bitbrdvec\n");
 }
 
 void life_init_ocl_bits(void){
-  printf("init ocl_bits\n");
 
   bits = sizeof(cell_t)*8;
   SIZEX =(DIM/bits);
@@ -401,7 +393,6 @@ void life_init_ocl_bits(void){
                             sizeof (unsigned), NULL, NULL);
   ENABLE_BITCELL = 2;
 
-    printf("end ocl_bits\n");
 }
 
 
@@ -739,7 +730,6 @@ return itres;
 
 unsigned life_compute_gottagofast(unsigned nb_iter)
 {
-  //printf("bitbrdvec\n");
   unsigned x;
   unsigned y;
   unsigned who;
@@ -998,7 +988,6 @@ static void cpu_steals_load(){
 
 
 void life_init_ocl_hybrid(void){
-  printf("init ocl_hybrids\n");
   
   bits  = sizeof(cell_t)*8;
   SIZEX =(DIM+(VEC_SIZE*2));
@@ -1018,7 +1007,6 @@ void life_init_ocl_hybrid(void){
   
   changeBuffer = clCreateBuffer (context, CL_MEM_READ_WRITE,
                             sizeof (unsigned), NULL, NULL);
-  printf("end ocl_hybrid\n");
   zero = _mm256_setzero_si256(); 
   mask1 = _mm256_set1_epi8(1);
   ENABLE_BITCELL = 0;
@@ -1050,7 +1038,6 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
   unsigned who;
   unsigned res;
   long t1,t2;
-  unsigned cpuCharge;
   for (unsigned it = 1; it <= nb_iter; it++) {
     
     gpuChange = False;
