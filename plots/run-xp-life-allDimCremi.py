@@ -4,8 +4,8 @@ from graphTools import *
 from expTools import *
 import os
 
-sizes = [2176]
-itt = 2000
+sizes = [512,1024,2048,4096,8192]
+itt = 25600
 nbrun = 1
 
 for s in sizes:
@@ -14,18 +14,18 @@ for s in sizes:
     options["-k "] = ["life"]
     options["-s "] = [s]
     options["-i "] = [itt]
-    options["-a "] = ["otca_off"]
+    options["-a "] = ["random"]
 
     #parametres pour nos runs
-    options["-tw "] = [32,64,128]
-    options["-v "] = ["lazybtmpvec"]
+    options["-v "] = ["omp_hybrid","omp","lazybtmpvec"]
     
     #parametres de precompileur 
-    ompenv["OMP_NUM_THREADS="] = [1] + list(range(2, 47,2))
+    ompenv["OMP_NUM_THREADS="] = [1] + list(range(2, 25,2))
     ompenv["OMP_PLACES="] = ["cores"]
     
     print(ompenv, options, nbrun)
-    execute('./run ', ompenv, options, nbrun, verbose=True, easyPath=".")
+    execute('TILEX=32 TILEY=32 ./run -o', ompenv, options, nbrun, verbose=True, easyPath=".")
 
+    itt = itt/4
     
 
