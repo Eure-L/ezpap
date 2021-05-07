@@ -43,24 +43,24 @@ __kernel void life_ocl(__global cell_t * in, __global cell_t * out,__global bool
     
     if(x>0 && y> 0 && x< DIM && y<DIM){ 
         unsigned  n = 0;
-        unsigned me  = in[table(y,x)] != 0;
+        unsigned me  = in[table_h(y,x)] != 0;
 
-        n += in[table(y,x)];
-        n += in[table(y-1,x)];
-        n += in[table(y,x-1)];
-        n += in[table(y-1,x-1)];
-        n += in[table(y+1,x)];
-        n += in[table(y,x+1)];
-        n += in[table(y+1,x+1)];
-        n += in[table(y+1,x-1)];
-        n += in[table(y-1,x+1)];    
+        n += in[table_h(y,x)];
+        n += in[table_h(y-1,x)];
+        n += in[table_h(y,x-1)];
+        n += in[table_h(y-1,x-1)];
+        n += in[table_h(y+1,x)];
+        n += in[table_h(y,x+1)];
+        n += in[table_h(y+1,x+1)];
+        n += in[table_h(y+1,x-1)];
+        n += in[table_h(y-1,x+1)];    
 
         n = (n == 3 + me) | (n == 3);
         
         if (n != me)
             *change = 1;
         
-        out[table(y,x)]=n;
+        out[table_h(y,x)]=n;
     }
 }
 
@@ -105,7 +105,7 @@ __kernel void life_ocl_bits(__global cell_t * in, __global cell_t * out,__global
     
 }
 
-#if 0
+#if 1
 
 // GPU-only version
 
@@ -115,7 +115,7 @@ __kernel void life_update_texture (__global cell_t *cur, __write_only image2d_t 
     int x = get_global_id (0);
     int2 pos = (int2)(x, y);
     
-    unsigned color = cur [y * DIM + x];
+    unsigned color = cur [(y+1) * (DIM+VEC_SIZE*2) + (x + VEC_SIZE)];
 
     write_imagef (tex, (int2)(x, y), color_scatter (color*0xFFFF00FF));
 

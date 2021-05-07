@@ -183,6 +183,17 @@ void life_refresh_img_ocl_bits (void){
   printf("end refresh_img_ocl_bits\n");
 }
 
+void life_refresh_img_ocl(void){
+  cl_int err;
+  unsigned offset =  SIZEX * sizeof(cell_t);
+  unsigned size = DIM*SIZEX*sizeof(cell_t);
+  err = clEnqueueReadBuffer (queue, cur_buffer, CL_TRUE,offset,
+                             size, _table+offset, 
+                             0, NULL, NULL);
+  check (err, "Failed to read buffer from GPU");
+  life_refresh_img();
+}
+
 void life_refresh_img_ocl_hybrid (void){
   //printf("refresh_img_ocl_hybrid\n");
 
