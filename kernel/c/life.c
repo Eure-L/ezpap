@@ -48,7 +48,7 @@ cl_event transfert_event;
 static unsigned cpu_y_part;
 static unsigned gpu_y_part;
 // Threashold
-#define THRESHOLD 1
+#define THRESHOLD 10
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
 {
@@ -888,7 +888,7 @@ static int much_greater_than (long t1, long t2)
 }
 
 static inline void print_load(void){
-  if(!do_display )
+  if(!do_display || true)
     printf("==> CPU %.2f%% load / GPU %.2f%% load \n",(float)cpu_y_part/DIM*100,(float)gpu_y_part/DIM*100);
 }
 
@@ -924,13 +924,14 @@ static void cpu_write_all(){
 
 static void do_statusQuo(){
   cl_int err;
-  unsigned rows       = 1;
+  unsigned rows       = TILE_H;
   unsigned offset     = SIZEX * (cpu_y_part+1 - rows);
   unsigned data_size  = SIZEX  * rows * sizeof (cell_t);
   cell_t * ptr        = _alternate_table + offset;
 
   //  CPU_PART
   if((!do_display)){
+    //printf("no display\n");
     err = nqWrtBuf(offset,  data_size, &next_buffer, ptr);
     ocl_monitor (transfert_event, 0, cpu_y_part-rows, DIM, rows, TASK_TYPE_WRITE);
     check (err, "Failed to send (part of) CPU contribution to the buffer");
@@ -962,8 +963,6 @@ static void gpu_steals_load(){
   }
   
   // after transfering data we adapt loads
-  cpu_y_part -= TILE_H;
-  gpu_y_part += TILE_H;
   print_load();
   printf("GPU steals Load\n");
 }
@@ -985,8 +984,7 @@ static void cpu_steals_load(){
   }
 
   // after transfering data we adapt loads
-  gpu_y_part -= TILE_H;
-  cpu_y_part += TILE_H;
+
   print_load();
   printf("CPU steals Load\n");
 }
@@ -1107,13 +1105,18 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
       ////CPU is stealing load
       if (much_greater_than (gpu_duration, cpu_duration) &&
                             gpu_y_part > TILE_H*2) {
+
         cpu_steals_load();
+        gpu_y_part -= TILE_H;
+        cpu_y_part += TILE_H;
         global[1] = gpu_y_part;
       }
       //// GPU is stealing load
       else if (much_greater_than (cpu_duration, gpu_duration) &&
                                   cpu_y_part > TILE_H*2) {
         gpu_steals_load();
+        cpu_y_part -= TILE_H;
+        gpu_y_part += TILE_H;
         global[1] = gpu_y_part;
       }else{
         do_statusQuo();        
