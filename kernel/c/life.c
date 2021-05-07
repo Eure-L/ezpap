@@ -38,6 +38,7 @@ unsigned ENABLE_BITCELL = 0;
 unsigned SIZEX ;
 unsigned SIZEY ;
 
+
 #define _table_SIZE (SIZEX*SIZEY*sizeof(cell_t))
 #define DIMTOT (SIZEX*SIZEY)
 
@@ -699,7 +700,6 @@ static bool hasAnyTileChanged(void){
 //OMP_PLACES=cores OMP_NUM_THREADS=1 ./run -k life -a random -s 2048 -ts 32 -v lazybtmpvec -m
 //OMP_PLACES=cores OMP_NUM_THREADS=4 ./run -k life -a otca_off -s 2176 -ts 64 -v lazybtmpvec -m
 
-#define xgrain 2 
 
 unsigned life_compute_lazybtmpvec (unsigned nb_iter){ 
     
@@ -995,6 +995,8 @@ static void cpu_steals_load(){
   PRINT_DEBUG ('u', "    ++\n");
 }
 
+
+
 void life_init_ocl_hybrid(void){
   printf("init ocl_hybrids\n");
   
@@ -1016,7 +1018,6 @@ void life_init_ocl_hybrid(void){
   
   changeBuffer = clCreateBuffer (context, CL_MEM_READ_WRITE,
                             sizeof (unsigned), NULL, NULL);
-
   printf("end ocl_hybrid\n");
   zero = _mm256_setzero_si256(); 
   mask1 = _mm256_set1_epi8(1);
@@ -1030,6 +1031,8 @@ void life_init_ocl_hybrid(void){
   gpu_y_part = DIM - cpu_y_part;
 
 }
+
+
 
 unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
 {
@@ -1047,8 +1050,9 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
   unsigned who;
   unsigned res;
   long t1,t2;
-
+  unsigned cpuCharge;
   for (unsigned it = 1; it <= nb_iter; it++) {
+    
     gpuChange = False;
     err = 0;
 
@@ -1070,7 +1074,7 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     check (err, "Failed to execute kernel");
     clFlush (queue);
 
-    /////// CPU part
+     /////// CPU part
     t1 = what_time_is_it ();
     #pragma omp parallel for schedule(dynamic) private(res,x,y,who)
     for(int j = 0; j< cpu_y_part/TILE_H  ;j++){ 
