@@ -48,7 +48,7 @@ cl_event transfert_event;
 static unsigned cpu_y_part;
 static unsigned gpu_y_part;
 // Threashold
-#define THRESHOLD 10
+#define THRESHOLD 5
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
 {
@@ -899,7 +899,6 @@ static int much_greater_than (long t1, long t2)
 }
 
 static inline void print_load(void){
-  if(!do_display || true)
     printf("==> CPU %.2f%% load / GPU %.2f%% load \n",(float)cpu_y_part/DIM*100,(float)gpu_y_part/DIM*100);
 }
 
@@ -960,7 +959,7 @@ static void do_statusQuo(){
 
 static void gpu_steals_load(){
   cl_int err;
-  unsigned rows       = TILE_H  * 2;
+  unsigned rows       = TILE_H  +1 ;
   unsigned offset     = SIZEX   * (cpu_y_part+1 - rows);
   unsigned data_size  = SIZEX   * rows * sizeof (cell_t);
   cell_t * ptr        = _alternate_table + offset ;
@@ -972,15 +971,13 @@ static void gpu_steals_load(){
   }else{
     cpu_write_all();
   }
-  
-  // after transfering data we adapt loads
   print_load();
   printf("GPU steals Load\n");
 }
 
 static void cpu_steals_load(){
   cl_int err;
-  unsigned rows       = TILE_H  * 2;
+  unsigned rows       = TILE_H  +1;
   unsigned offset     = SIZEX   * (cpu_y_part+1) * sizeof (cell_t);
   unsigned data_size  = SIZEX   * rows * sizeof (cell_t);
   cell_t * ptr        = _alternate_table + SIZEX * (cpu_y_part+1) * sizeof (cell_t);     
