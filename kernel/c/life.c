@@ -935,7 +935,7 @@ static void cpu_write_all(){
 
 static void do_statusQuo(){
   cl_int err;
-  unsigned rows       = TILE_H;
+  unsigned rows       = 1;
   unsigned offset     = SIZEX * (cpu_y_part+1 - rows);
   unsigned data_size  = SIZEX  * rows * sizeof (cell_t);
   cell_t * ptr        = _alternate_table + offset;
@@ -1108,7 +1108,7 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
                                 global[1], TASK_TYPE_COMPUTE);
     
     // CPU waiting for the GPU to finish
-    //clFinish (queue);
+    clFinish (queue);
 
 
 //Load balancing
