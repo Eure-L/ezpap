@@ -9,8 +9,9 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-// Changer le type en char pour lazybtmpvec
+/////// Changer le type en unsigned pour la version en bits
 typedef char cell_t;
+///////
 
 static unsigned color = 0xFFFF00FF; // Living cells have the yellow color
 
@@ -374,8 +375,6 @@ void life_init_gottagofast(void)
   
   clear_table(_table);
   printf("end init bitbrdvec\n");
-
-  
 }
 
 void life_init_ocl_bits(void){
@@ -685,7 +684,6 @@ static int do_tile_bitbrdvec (int x, int y, int width, int height, int who)
 
   return r;
 }
-
 // returns true if any thread has witnessed any change
 static bool hasAnyTileChanged(void){
   for(int i =0 ; i < 256; i ++){
@@ -767,6 +765,7 @@ unsigned life_compute_gottagofast(unsigned nb_iter)
   }
   return 0;
 }
+
 
 static inline void swap_buffers(void)
 { 
@@ -972,8 +971,8 @@ static void gpu_steals_load(){
   }else{
     cpu_write_all();
   }
-  print_load();
-  printf("GPU steals Load\n");
+  //print_load();
+  //printf("GPU steals Load\n");
 }
 
 static void cpu_steals_load(){
@@ -994,8 +993,8 @@ static void cpu_steals_load(){
 
   // after transfering data we adapt loads
 
-  print_load();
-  printf("CPU steals Load\n");
+  //print_load();
+  //printf("CPU steals Load\n");
 }
 
 void life_init_ocl_hybrid(void){
@@ -1164,7 +1163,6 @@ void life_draw_guns (void);
 
 static inline void set_cell (int y, int x)
 {
-  //printf("set\n");
   if(ENABLE_BITCELL==2)
     setcurBitCellRow(x,y,1);
   else
@@ -1172,8 +1170,6 @@ static inline void set_cell (int y, int x)
   if (opencl_used){
       *((cell_t*)image +(y+1) * (DIM+VEC_SIZE*2) + (x + VEC_SIZE)) = 1;
   }
-  //printf("end set\n");
-
 }
 
 static inline int get_cell (int y, int x)

@@ -48,12 +48,9 @@ __kernel void life_ocl(__global cell_t * in, __global cell_t * out,__global bool
 
     int y = get_global_id (1);
     int x = get_global_id (0);
-    
-
     if(x>0 && y> 0 && x< DIM && y<DIM){ 
         unsigned  n = 0;
         unsigned me  = in[table_h(y,x)] != 0;
-
         n += in[table_h(y,x)];
         n += in[table_h(y-1,x)];
         n += in[table_h(y,x-1)];
@@ -69,7 +66,6 @@ __kernel void life_ocl(__global cell_t * in, __global cell_t * out,__global bool
         if (n != me){
             *change = 1;
         }
-        
         out[table_h(y,x)]=n;
     }
     
