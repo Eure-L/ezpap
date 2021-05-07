@@ -348,6 +348,7 @@ void life_init_ocl(void)
   life_init();
   changeBuffer = clCreateBuffer (context, CL_MEM_READ_WRITE,
                             sizeof (unsigned), NULL, NULL);
+
   printf("end initocl\n");
 }
 
@@ -1018,16 +1019,18 @@ void life_init_ocl_hybrid(void){
   
   changeBuffer = clCreateBuffer (context, CL_MEM_READ_WRITE,
                             sizeof (unsigned), NULL, NULL);
+
+ 
   // curbitMapBuffer =  clCreateBuffer (context, CL_MEM_READ_WRITE,
   //                           NB_FAKE_TILES * sizeof(char), NULL, NULL);
   // nextbitMapBuffer =  clCreateBuffer (context, CL_MEM_READ_WRITE,
   //                           NB_FAKE_TILES * sizeof(char), NULL, NULL);
-
   // cl_int err =clEnqueueWriteBuffer (queue, curbitMapBuffer, CL_TRUE, 0,
-  //            NB_FAKE_TILES * sizeof(char), cur_fmapAddr(0,0), 0, NULL,NULL); 
+  //            NB_FAKE_TILES * sizeof(char), cur_fmapAddr(0,0), 0, NULL,NULL);
+  // check (err, "Failed to write the curbitmapbuffer");
   // err = clEnqueueWriteBuffer (queue, nextbitMapBuffer, CL_TRUE, 0,
   //            NB_FAKE_TILES * sizeof(char), next_fmapAddr(0,0), 0, NULL,NULL);
-  //check (err, "Failed to write the bitmapbuffer");
+  // check (err, "Failed to write the bitmapbuffer");
 
   printf("end ocl_hybrid\n");
   zero = _mm256_setzero_si256(); 

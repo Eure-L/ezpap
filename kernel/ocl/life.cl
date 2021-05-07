@@ -1,5 +1,4 @@
 #include "kernel/ocl/common.cl"
-
 typedef char cell_t;
 
 #define R 255
@@ -8,6 +7,8 @@ typedef char cell_t;
 #define bits sizeof(cell_t)*8
 #define AVXBITS 256
 #define VEC_SIZE (AVXBITS/(sizeof(cell_t)*8))
+#define NB_FAKE_X ((DIM/GPU_TILE_W)+2)
+#define NB_FAKE_Y ((DIM/GPU_TILE_H)+2)
 
 ////////////////    Tools
 static inline int table_cell ( int y, int x)
@@ -19,20 +20,27 @@ static inline int table_cell_hybrid ( int y, int x)
 {
     return (y+1) * (DIM+VEC_SIZE*2) + (x + VEC_SIZE); 
 }
-
 #define table(y, x) (table_cell ((y), (x)))
 #define table_h(y, x) (table_cell_hybrid ((y), (x)))
 
-//returns the index of the word of type cell_t, containing the cell at coordinate x,y
-// static inline cell_t *table_cell_row ( int y, int x)
-// { 
-//   return  (y+1) * (DIM) + (((x+bits)/bits)+VEC_SIZE);
+
+
+// //////////Bitmap
+static inline int table_map ( int x, int y)
+{
+  return  (y+1) * NB_FAKE_X + (x+1);
+}
+#define map(x, y) (table_map ( (x), (y)))
+
+
+// static inline unsigned getBitCellRow(cell_t cell, unsigned i){
+//   return cell>>((i)%bits)&(0x01);
 // }
 
-// #define table_row(y, x) ((*table_cell_row ((y), (x))))
+static inline bool hasNeighbourChanged(unsigned i,unsigned j, __global char * mapp){
 
-static inline unsigned getBitCellRow(cell_t cell, unsigned i){
-  return cell>>((i)%bits)&(0x01);
+  return  *(mapp+map(i,j))|*(mapp+map(i-1,j))|*(mapp+map(i+1,j))|*(mapp+map(i,j-1))|*(mapp+map(i,j+1))
+  |*(mapp+map(i-1,j-1))|*(mapp+map(i+1,j+1))|*(mapp+map(i+1,j-1))|*(mapp+map(i-1,j+1));
 }
 
 //////////////////  OCL VERSIONS
@@ -41,6 +49,7 @@ __kernel void life_ocl(__global cell_t * in, __global cell_t * out,__global bool
     int y = get_global_id (1);
     int x = get_global_id (0);
     
+
     if(x>0 && y> 0 && x< DIM && y<DIM){ 
         unsigned  n = 0;
         unsigned me  = in[table_h(y,x)] != 0;
@@ -57,11 +66,13 @@ __kernel void life_ocl(__global cell_t * in, __global cell_t * out,__global bool
 
         n = (n == 3 + me) | (n == 3);
         
-        if (n != me)
+        if (n != me){
             *change = 1;
+        }
         
         out[table_h(y,x)]=n;
     }
+    
 }
 
 __kernel void life_ocl_hybrid(__global cell_t * in, __global cell_t * out,__global bool * change,
@@ -99,10 +110,8 @@ __kernel void life_ocl_bits(__global cell_t * in, __global cell_t * out,__global
 
     // the thread operates on the word containing the desired cell
 
-
     out[y*DIM+x] = 1;
-        
-    
+         
 }
 
 #if 1
@@ -119,14 +128,7 @@ __kernel void life_update_texture (__global cell_t *cur, __write_only image2d_t 
 
     write_imagef (tex, (int2)(x, y), color_scatter (color*0xFFFF00FF));
 
-    // int y = get_global_id (1);
-    // int x = get_global_id (0);
-    // int2 pos = (int2)(x, y);
-    // unsigned c = cur [y * DIM + x];
 
-    // c = rgba(R*c, G*c, B*c, 0xFF);
-
-    // write_imagef (tex, pos, color_scatter (c));
 
 
 }
@@ -145,14 +147,6 @@ __kernel void life_update_texture (__global cell_t *cur, __write_only image2d_t 
 
     write_imagef (tex, (int2)(x, y), color_scatter (color*0xFFFF00FF));
 
-    // int y = get_global_id (1);
-    // int x = get_global_id (0);
-    // int2 pos = (int2)(x, y);
-    // unsigned c = cur [y * DIM + x];
-
-    // c = rgba(R*c, G*c, B*c, 0xFF);
-
-    // write_imagef (tex, pos, color_scatter (c));
 }
 
 // #else
