@@ -29,7 +29,7 @@ static size_t max_workgroup_size = 0;
 
 static cl_platform_id chosen_platform = NULL;
 cl_device_id chosen_device            = NULL;
-static cl_program program; // compute program
+cl_program program; // compute program
 
 cl_context context;
 cl_kernel update_kernel;
@@ -317,7 +317,7 @@ static void ocl_list_variants (void)
     printf ("%s\n", buffer);
   }
 
-  exit (0);
+  exit (EXIT_SUCCESS);
 }
 
 #define CALIBRATION_BURST 4
@@ -424,18 +424,22 @@ void ocl_build_program (int list_variants)
 
   // Compile program
   //
+  char *debug_str = "";
+  if (debug_enabled ('o'))
+    debug_str = "-DDEBUG=1";
+
   if (draw_param)
     sprintf (buffer,
              "-cl-mad-enable -cl-fast-relaxed-math"
              " -DDIM=%d -DGPU_SIZE_X=%d -DGPU_SIZE_Y=%d -DGPU_TILE_W=%d -DGPU_TILE_H=%d -DKERNEL_%s"
-             " -DPARAM=%s",
-             DIM, GPU_SIZE_X, GPU_SIZE_Y, GPU_TILE_W, GPU_TILE_H, kernel_name, draw_param);
+             " -DPARAM=%s %s",
+             DIM, GPU_SIZE_X, GPU_SIZE_Y, GPU_TILE_W, GPU_TILE_H, kernel_name, draw_param, debug_str);
   else
     sprintf (
         buffer,
         "-cl-mad-enable -cl-fast-relaxed-math"
-        " -DDIM=%d -DGPU_SIZE_X=%d -DGPU_SIZE_Y=%d -DGPU_TILE_W=%d -DGPU_TILE_H=%d -DKERNEL_%s",
-        DIM, GPU_SIZE_X, GPU_SIZE_Y, GPU_TILE_W, GPU_TILE_H, kernel_name);
+        " -DDIM=%d -DGPU_SIZE_X=%d -DGPU_SIZE_Y=%d -DGPU_TILE_W=%d -DGPU_TILE_H=%d -DKERNEL_%s %s",
+        DIM, GPU_SIZE_X, GPU_SIZE_Y, GPU_TILE_W, GPU_TILE_H, kernel_name, debug_str);
 
   err = clBuildProgram (program, 0, NULL, buffer, NULL, NULL);
 
@@ -608,15 +612,14 @@ long ocl_monitor (cl_event evt, int x, int y, int width, int height,
                   task_type_t task_type)
 {
   long start, end;
-  unsigned gpu_lane = easypap_gpu_lane (TASK_TYPE_COMPUTE);
+  unsigned gpu_lane = easypap_gpu_lane (task_type);
 
   start = ocl_start_time (evt);
   end   = ocl_end_time (evt);
 
   long now = what_time_is_it ();
-  if (end > now) {
-    fprintf (stderr, "Warning: end of kernel (%s) ahead of current time by %ld µs\n", task_type == TASK_TYPE_COMPUTE ? "TASK_TYPE_COMPUTE" : "TASK_TYPE_TRANSFER", end - now);
-  }
+  if (end > now)
+    PRINT_DEBUG ('o', "Warning: end of kernel (%s) ahead of current time by %ld µs\n", task_type == TASK_TYPE_COMPUTE ? "TASK_TYPE_COMPUTE" : "TASK_TYPE_TRANSFER", end - now);
 
   PRINT_DEBUG ('m', "[%s] start: %ld, end: %ld\n", "kernel", start, end);
 

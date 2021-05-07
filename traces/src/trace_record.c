@@ -10,7 +10,7 @@
 
 #define CONFIG_FUT
 #include <fut.h>
-#define BUFFER_SIZE (1 << 20)
+#define BUFFER_SIZE (16 << 20)
 
 #endif
 

@@ -42,6 +42,7 @@ size_t ocl_get_max_workgroup_size (void);
 extern unsigned GPU_SIZE_X, GPU_SIZE_Y, GPU_TILE_W, GPU_TILE_H, GPU_TILE_W;
 
 extern cl_context context;
+extern cl_program program;
 extern cl_kernel compute_kernel;
 extern cl_command_queue queue;
 extern cl_mem cur_buffer, next_buffer;

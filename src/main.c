@@ -34,7 +34,8 @@ char *draw_param         = NULL;
 char *easypap_image_file = NULL;
 
 static char *output_file = "./plots/data/perf_data.csv";
-static char *label       = NULL;
+#define MAX_LABEL 64
+static char trace_label[MAX_LABEL] = {0};
 
 unsigned opencl_used                                       = 0;
 unsigned easypap_mpirun                                    = 0;
@@ -71,6 +72,12 @@ unsigned easypap_gpu_lane (task_type_t task_type)
 char *easypap_omp_schedule (void)
 {
   char *str = getenv ("OMP_SCHEDULE");
+  return (str == NULL) ? "" : str;
+}
+
+char *easypap_omp_places (void)
+{
+  char *str = getenv ("OMP_PLACES");
   return (str == NULL) ? "" : str;
 }
 
@@ -149,20 +156,35 @@ static void output_perf_numbers (long time_in_us, unsigned nb_iter)
                      strerror (errno));
 
   if (ftell (f) == 0) {
-    fprintf (f, "%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s\n", "machine", "size",
+    fprintf (f, "%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s\n", "machine", "size",
              "tilew", "tileh", "threads", "kernel", "variant", "iterations",
-             "schedule", "label", "arg", "time");
+             "schedule", "places", "label", "arg", "time");
   }
 
   if (uname (&s) < 0)
     exit_with_error ("uname failed (%s)", strerror (errno));
 
-  fprintf (f, "%s;%u;%u;%u;%u;%s;%s;%u;%s;%s;%s;%ld\n", s.nodename, DIM, TILE_W,
-           TILE_H, easypap_requested_number_of_threads (), kernel_name,
+  fprintf (f, "%s;%u;%u;%u;%u;%s;%s;%u;%s;%s;%s;%s;%ld\n", s.nodename, DIM,
+           TILE_W, TILE_H, easypap_requested_number_of_threads (), kernel_name,
            variant_name, nb_iter, easypap_omp_schedule (),
-           (label ?: "unlabelled"), (draw_param ?: "none"), time_in_us);
+           easypap_omp_places (), trace_label, (draw_param ?: "none"),
+           time_in_us);
 
   fclose (f);
+}
+
+static void set_default_trace_label (void)
+{
+  if (trace_label[0] == '\0') {
+    char *str = getenv ("OMP_SCHEDULE");
+
+    if (str != NULL)
+      snprintf (trace_label, MAX_LABEL, "%s_%s (%s) %d/%dx%d", kernel_name,
+                variant_name, str, DIM, TILE_W, TILE_H);
+    else
+      snprintf (trace_label, MAX_LABEL, "%s_%s %d/%dx%d", kernel_name,
+                variant_name, DIM, TILE_W, TILE_H);
+  }
 }
 
 static void usage (int val);
@@ -288,8 +310,10 @@ static void init_phases (void)
     else
       strcpy (filename, DEFAULT_EASYVIEW_FILE);
 
+    set_default_trace_label ();
+
     trace_record_init (filename, easypap_requested_number_of_threads (),
-                       easypap_number_of_gpus (), DIM, label);
+                       easypap_number_of_gpus (), DIM, trace_label);
   }
 #endif
 #endif
@@ -503,7 +527,7 @@ int main (int argc, char **argv)
             if (!opencl_used && the_refresh_img)
               the_refresh_img ();
 
-            if (do_thumbs && easypap_proc_is_master ()) {
+            if (do_thumbs) {
               static unsigned iter_no = 0;
 
               if (opencl_used) {
@@ -512,8 +536,9 @@ int main (int argc, char **argv)
                 else
                   ocl_retrieve_data ();
               }
-
-              graphics_save_thumbnail (++iter_no);
+              
+              if (easypap_proc_is_master ())
+                graphics_save_thumbnail (++iter_no);
             }
           }
 
@@ -560,7 +585,7 @@ int main (int argc, char **argv)
         monitoring_end_iteration ();
 
 #ifdef ENABLE_SDL
-        if (do_thumbs && easypap_proc_is_master ()) {
+        if (do_thumbs) {
           static unsigned iter_no = 0;
 
           if (the_refresh_img)
@@ -568,7 +593,8 @@ int main (int argc, char **argv)
           else if (opencl_used)
             ocl_retrieve_data ();
 
-          graphics_save_thumbnail (++iter_no);
+          if (easypap_proc_is_master ())
+            graphics_save_thumbnail (++iter_no);
         }
 #endif
 
@@ -594,19 +620,21 @@ int main (int argc, char **argv)
 
 #ifdef ENABLE_SDL
   // Check if final image should be dumped on disk
-  if (do_dump && easypap_proc_is_master ()) {
-
-    char filename[1024];
+  if (do_dump) {
 
     if (the_refresh_img)
       the_refresh_img ();
     else if (opencl_used)
       ocl_retrieve_data ();
 
-    sprintf (filename, "dump-%s-%s-dim-%d-iter-%d.png", kernel_name,
-             variant_name, DIM, iterations);
+    if (easypap_proc_is_master ()) {
+      char filename[1024];
 
-    graphics_dump_image_to_file (filename);
+      sprintf (filename, "dump-%s-%s-dim-%d-iter-%d.png", kernel_name,
+               variant_name, DIM, iterations);
+
+      graphics_dump_image_to_file (filename);
+    }
   }
 #endif
 
@@ -663,6 +691,8 @@ static void usage (int val)
   fprintf (stderr, "\t-nt\t| --nb-tiles <N>\t: use N x N tiles\n");
   fprintf (stderr, "\t-nvs\t| --no-vsync\t\t: disable vertical sync\n");
   fprintf (stderr, "\t-o\t| --ocl\t\t\t: use OpenCL version\n");
+  fprintf (stderr, "\t-of\t| --output-file <nfike>\t: output performance "
+                   "numbers in <file>\n");
   fprintf (stderr, "\t-p\t| --pause\t\t: pause between iterations (press space "
                    "to continue)\n");
   fprintf (stderr, "\t-q\t| --quit\t\t: exit once iterations are done\n");
@@ -711,7 +741,7 @@ static void filter_args (int *argc, char *argv[])
     } else if (!strcmp (*argv, "--show-ocl") || !strcmp (*argv, "-so")) {
       show_ocl_config = 1;
       opencl_used     = 1;
-      do_display      = 0;
+      // do_display      = 0;
 #ifdef ENABLE_SDL
     } else if (!strcmp (*argv, "--show-iterations") || !strcmp (*argv, "-si")) {
       graphics_toggle_display_iteration_number ();
@@ -767,7 +797,7 @@ static void filter_args (int *argc, char *argv[])
       }
       (*argc)--;
       argv++;
-      label = *argv;
+      snprintf (trace_label, MAX_LABEL, "%s", *argv);
     } else if (!strcmp (*argv, "--mpirun") || !strcmp (*argv, "-mpi")) {
 #ifndef ENABLE_MPI
       fprintf (stderr, "Warning: --mpi has no effect when ENABLE_MPI "
@@ -891,6 +921,14 @@ static void filter_args (int *argc, char *argv[])
       argv++;
 
       debug_init (*argv);
+    } else if (!strcmp (*argv, "--output-file") || !strcmp (*argv, "-of")) {
+      if (*argc == 1) {
+        fprintf (stderr, "Error: filename is missing\n");
+        usage (1);
+      }
+      (*argc)--;
+      argv++;
+      output_file = *argv;
     } else {
       fprintf (stderr, "Error: unknown option %s\n", *argv);
       usage (1);

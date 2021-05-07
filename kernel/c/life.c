@@ -910,6 +910,87 @@ static cl_int nqRdBuf(unsigned offset, unsigned size, cl_mem * buffer, cell_t * 
                                   NULL, &transfert_event);
 }
 
+static void cpu_write_all(){
+  cl_int err;
+  unsigned rows       = cpu_y_part;
+  unsigned offset     = SIZEX * sizeof (cell_t);
+  unsigned data_size  = SIZEX * rows * sizeof (cell_t);
+  cell_t * ptr        = _alternate_table + offset;
+
+  err = nqWrtBuf(offset,  data_size, &next_buffer, ptr);
+  ocl_monitor (transfert_event, 0, cpu_y_part-rows, DIM, rows, TASK_TYPE_WRITE);
+  check (err, "Failed to send (part of) CPU contribution to the buffer");
+}
+
+static void do_statusQuo(){
+  cl_int err;
+  unsigned rows       = 1;
+  unsigned offset     = SIZEX * (cpu_y_part+1 - rows);
+  unsigned data_size  = SIZEX  * rows * sizeof (cell_t);
+  cell_t * ptr        = _alternate_table + offset;
+
+  //  CPU_PART
+  if((!do_display)){
+    err = nqWrtBuf(offset,  data_size, &next_buffer, ptr);
+    ocl_monitor (transfert_event, 0, cpu_y_part-rows, DIM, rows, TASK_TYPE_WRITE);
+    check (err, "Failed to send (part of) CPU contribution to the buffer");
+  }else{
+    cpu_write_all();
+  }
+
+  //GPU part
+  offset    = SIZEX * (cpu_y_part+1) * sizeof (cell_t);
+  ptr       = _alternate_table + offset;
+  err = nqRdBuf(offset,  data_size, &next_buffer, ptr);
+  ocl_monitor (transfert_event, 0, cpu_y_part, DIM, rows, TASK_TYPE_READ);
+  check (err, "Failed to send GPU bordering tiles contribution to the RAM");
+}
+
+static void gpu_steals_load(){
+  cl_int err;
+  unsigned rows       = TILE_H  * 2;
+  unsigned offset     = SIZEX   * (cpu_y_part+1 - rows);
+  unsigned data_size  = SIZEX   * rows * sizeof (cell_t);
+  cell_t * ptr        = _alternate_table + offset ;
+  
+  if((!do_display)){
+    err = nqWrtBuf(offset,  data_size, &next_buffer, ptr);
+    ocl_monitor (transfert_event, 0, cpu_y_part-rows, DIM, rows, TASK_TYPE_WRITE);
+    check (err, "Failed to send (part of) CPU contribution to the buffer");
+  }else{
+    cpu_write_all();
+  }
+  
+  // after transfering data we adapt loads
+  cpu_y_part -= TILE_H;
+  gpu_y_part += TILE_H;
+  print_load();
+  printf("GPU steals Load\n");
+}
+
+static void cpu_steals_load(){
+  cl_int err;
+  unsigned rows       = TILE_H  * 2;
+  unsigned offset     = SIZEX   * (cpu_y_part+1) * sizeof (cell_t);
+  unsigned data_size  = SIZEX   * rows * sizeof (cell_t);
+  cell_t * ptr        = _alternate_table + SIZEX * (cpu_y_part+1) * sizeof (cell_t);     
+  
+  err = nqRdBuf(offset,  data_size, &next_buffer, ptr);
+  ocl_monitor (transfert_event, 0, cpu_y_part, DIM, rows, TASK_TYPE_READ);
+  check (err, "Failed to send GPU bordering tiles contribution to the RAM");
+  clFinish (queue);
+
+  if(do_display){
+    cpu_write_all();
+  }
+
+  // after transfering data we adapt loads
+  gpu_y_part -= TILE_H;
+  cpu_y_part += TILE_H;
+  print_load();
+  printf("CPU steals Load\n");
+}
+
 void life_init_ocl_hybrid(void){
   printf("init ocl_hybrids\n");
   
@@ -958,11 +1039,6 @@ void life_init_ocl_hybrid(void){
 
 unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
 {
-  unsigned rows;
-  cell_t * ptr;
-  unsigned offset;
-  unsigned data_size;
-  bool gpu_steal,cpu_steal;
 
   //GPU VARIABLES
   size_t global[2] = {DIM, gpu_y_part};
@@ -979,13 +1055,8 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
   bool gpuChange = False;
 
   for (unsigned it = 1; it <= nb_iter; it++) {
-    gpu_steal = false;
-    cpu_steal = false;
     gpuChange = False;
     err = 0;
-
-
-    
 
     // sets gpuChange status into GPU memory
     err =clEnqueueWriteBuffer (queue, changeBuffer, CL_TRUE, 0,
@@ -1027,115 +1098,40 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     gpu_duration = ocl_monitor (kernel_event, 0, cpu_y_part, global[0],
                                 global[1], TASK_TYPE_COMPUTE);
     
-    //clearing current map for next itteration
-    deleteCurrentBtmp();
-    setGPUborderBtmp();
     // CPU waiting for the GPU to finish
-    clFinish (queue);
+    //clFinish (queue);
 
 
 //Load balancing
     if (gpu_duration && cpu_duration) {
+      ////CPU is stealing load
       if (much_greater_than (gpu_duration, cpu_duration) &&
-          gpu_y_part > TILE_H*2) {
-
-        rows = TILE_H;
-        data_size = SIZEX * rows * sizeof (cell_t);
-        offset    = SIZEX * (cpu_y_part+1) * sizeof (cell_t);
-        ptr       = _alternate_table + SIZEX * (cpu_y_part+1) * sizeof (cell_t);
-        
-          err = nqRdBuf(offset,  data_size, &next_buffer, ptr);
-          ocl_monitor (transfert_event, 0, cpu_y_part, DIM, rows, TASK_TYPE_READ);
-          check (err, "Failed to send GPU bordering tiles contribution to the RAM");
-          clFinish (queue);
-
-        if(do_display){
-          rows = cpu_y_part;
-          data_size = SIZEX * rows * sizeof (cell_t);
-          offset    = SIZEX * (cpu_y_part+1 - rows);
-          ptr       = _alternate_table + offset;
-            err = nqWrtBuf(offset,  data_size, &next_buffer, ptr);
-            ocl_monitor (transfert_event, 0, cpu_y_part-rows, DIM, rows, TASK_TYPE_WRITE);
-            check (err, "Failed to send (part of) CPU contribution to the buffer");
-            clFinish (queue);
-        }
-
-        // after transfering data we adapt loads
-        gpu_y_part -= TILE_H;
-        cpu_y_part += TILE_H;
+                            gpu_y_part > TILE_H*2) {
+        cpu_steals_load();
         global[1] = gpu_y_part;
-        print_load();
-        cpu_steal=true;
-        printf("CPU steals Load\n");
-      } 
+      }
+      //// GPU is stealing load
       else if (much_greater_than (cpu_duration, gpu_duration) &&
-                 cpu_y_part > TILE_H*2) {
-        
-        
-        rows = TILE_H;
-        data_size = SIZEX * rows * sizeof (cell_t);
-        offset    = SIZEX * (cpu_y_part+1 - rows);
-        ptr       = _alternate_table + offset;
-
-          err = nqWrtBuf(offset,  data_size, &next_buffer, ptr);
-          ocl_monitor (transfert_event, 0, cpu_y_part-rows, DIM, rows, TASK_TYPE_WRITE);
-          check (err, "Failed to send (part of) CPU contribution to the buffer");
-          clFinish (queue);
-
-        if(do_display){
-          rows = cpu_y_part;
-          data_size = SIZEX * rows * sizeof (cell_t);
-          offset    = SIZEX * (cpu_y_part+1 - rows);
-          ptr       = _alternate_table + offset;
-            err = nqWrtBuf(offset,  data_size, &next_buffer, ptr);
-            ocl_monitor (transfert_event, 0, cpu_y_part-rows, DIM, rows, TASK_TYPE_WRITE);
-            check (err, "Failed to send (part of) CPU contribution to the buffer");
-            clFinish (queue);
-        }
-        
-        // after transfering data we adapt loads
-        cpu_y_part -= TILE_H;
-        gpu_y_part += TILE_H;
+                                  cpu_y_part > TILE_H*2) {
+        gpu_steals_load();
         global[1] = gpu_y_part;
-        print_load();
-        gpu_steal = true;
-        printf("GPU steals Load\n");
+      }else{
+        do_statusQuo();        
       }
-      else{
-          
-          rows = 1;
-          data_size = SIZEX  * rows * sizeof (cell_t);
-          offset    = SIZEX * (cpu_y_part+1 - rows);
-          ptr       = _alternate_table + offset;
-            err = nqWrtBuf(offset,  data_size, &next_buffer, ptr);
-            ocl_monitor (transfert_event, 0, cpu_y_part-rows, DIM, rows, TASK_TYPE_WRITE);
-            check (err, "Failed to send (part of) CPU contribution to the buffer");
-          
-          offset    = SIZEX * (cpu_y_part+1) * sizeof (cell_t);
-          ptr       = _alternate_table + offset;
-            err = nqRdBuf(offset,  data_size, &next_buffer, ptr);
-            ocl_monitor (transfert_event, 0, cpu_y_part, DIM, rows, TASK_TYPE_READ);
-            check (err, "Failed to send GPU bordering tiles contribution to the RAM");
-          
-          if(do_display){
-          rows = cpu_y_part;
-          data_size = SIZEX * rows * sizeof (cell_t);
-          offset    = SIZEX * (cpu_y_part+1 - rows);
-          ptr       = _alternate_table + offset;
-            err = nqWrtBuf(offset,  data_size, &next_buffer, ptr);
-            ocl_monitor (transfert_event, 0, cpu_y_part-rows, DIM, rows, TASK_TYPE_WRITE);
-            check (err, "Failed to send (part of) CPU contribution to the buffer");
-            clFinish (queue);
-        }
-      }
-    }  
-
+    }
+    else{
+      do_statusQuo();
+    }
+    
     // Retrieves the GpuChangeBuffer
     err = clEnqueueReadBuffer(queue, changeBuffer, CL_TRUE, 0, sizeof(unsigned),
           &gpuChange, 0, NULL, &kernel_event);
-    check (err, "Failed to Read the buffer");
-    clFinish (queue);
-    
+    check (err, "Failed to Read the buffer");    
+    //clFinish (queue);
+
+    //clearing current map for next itteration
+    deleteCurrentBtmp();
+    setGPUborderBtmp();
 
     swap_buffers();
     swap_tables();
@@ -1144,7 +1140,7 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     if(!gpuChange && !hasAnyTileChanged())
       return it;
   }
-  clFinish (queue);
+  //clFinish (queue);
   return 0;
 }
 
