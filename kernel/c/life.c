@@ -959,8 +959,8 @@ static void gpu_steals_load(){
     cpu_write_all();
   }
   
-  PRINT_DEBUG ('u', "CPU %.2f%%     /     GPU %.2f%% \n", (float)cpu_y_part/DIM*100,(float)gpu_y_part/DIM*100);
-  PRINT_DEBUG ('u', "                         ++\n");
+  PRINT_DEBUG ('z', "CPU %.2f%%     /     GPU %.2f%% \n", (float)cpu_y_part/DIM*100,(float)gpu_y_part/DIM*100);
+  PRINT_DEBUG ('z', "                         ++\n");
 }
 
 // if the CPU steals load
@@ -981,8 +981,8 @@ static void cpu_steals_load(){
     cpu_write_all();
   }
   
-  PRINT_DEBUG ('u', "CPU %.2f%%     /     GPU %.2f%%  \n", (float)cpu_y_part/DIM*100,(float)gpu_y_part/DIM*100);
-  PRINT_DEBUG ('u', "    ++\n");
+  PRINT_DEBUG ('z', "CPU %.2f%%     /     GPU %.2f%%  \n", (float)cpu_y_part/DIM*100,(float)gpu_y_part/DIM*100);
+  PRINT_DEBUG ('z', "    ++\n");
 }
 
 
@@ -1074,20 +1074,22 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
           threadChange[who] |= res;
           *next_mapAddr(i,j)=res;
         }
-      } 
+      }
     }
     t2           = what_time_is_it ();
     cpu_duration = t2 - t1;
 
-    //  GPU monitoring 
-    gpu_duration = ocl_monitor (kernel_event, 0, cpu_y_part, global[0],
-                                global[1], TASK_TYPE_COMPUTE);
-    //clReleaseEvent (kernel_event);
+   
     
     // CPU waiting for the GPU to finish
     clFinish (queue);
+     //  GPU monitoring 
+    gpu_duration = ocl_monitor (kernel_event, 0, cpu_y_part, global[0],
+                                global[1], TASK_TYPE_COMPUTE);
+
+    clReleaseEvent (kernel_event);
     gpu_accumulated_lines += gpu_y_part;
-    
+    clFinish (queue);
     //Load balancing
     if (gpu_duration && cpu_duration) {
       ////CPU is stealing load
