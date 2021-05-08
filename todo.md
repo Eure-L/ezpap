@@ -12,8 +12,9 @@ PC salle 203 -- RTX 2070 + Intel 12c24T
 
 
 ## 2 - Bit board CPU
-- speedup variant le nombre de threads 
-- comparaison vs version Hybride
+- trouver la meilleure tile
+- speedup variant le nombre de threads  OK
+- comparaison vs version Hybride        OK
 ### Explications
 - Origine
 - explication de l'algorithme
