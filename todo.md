@@ -4,18 +4,20 @@ PC salle 203 -- RTX 2070 + Intel 12c24T
 
 ## 1 - Hybride OCL + AVX
 - equilibrage de charge dynamique
-    - analyse de trame
-    - partie du code
-    - (Graph)comparaison Avec/Sans
+    - analyse de trame                  OK
+    - partie du code                    OK
+    - (Graph)comparaison Avec/Sans      OK
 
-- speedup variant le nb de threads
-- comparaison temps vs single GPU
-- comparaison temps vs best AVX
+- comparaison temps vs single GPU       OK
 
 
 ## 2 - Bit board CPU
 - speedup variant le nombre de threads 
 - comparaison vs version Hybride
+### Explications
+- Origine
+- explication de l'algorithme
+
 
 ## 3 - Bit board GPU
 

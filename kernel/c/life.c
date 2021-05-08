@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 /////// Changer le type en unsigned pour la version en bits
-typedef char cell_t;
+typedef unsigned cell_t;
 ///////
 
 static unsigned color = 0xFFFF00FF; // Living cells have the yellow color
@@ -163,15 +163,15 @@ void life_refresh_img (void)
       cur_img (i, j) = cur_table (i, j) * color;
 }
 
-void life_refresh_img_gottagofast (void)
+void life_refresh_img_bitbrd (void)
 {
-  //printf("refresh gottagofast\n");
+  //printf("refresh bitbrd\n");
   for (int i = 0; i < DIM; i++){
     for (int j = 0; j < DIM; j++){
         cur_img (i, j) = (getBitCellRow (j, i) )* color; 
     }
   }
-  //printf("end refresh gottagofast\n");
+  //printf("end refresh bitbrd\n");
 }
 
 void life_refresh_img_ocl_bits (void){
@@ -179,7 +179,7 @@ void life_refresh_img_ocl_bits (void){
   cl_int err;
   err = clEnqueueReadBuffer (queue, cur_buffer, CL_TRUE, 0, _table_SIZE, _table, 0, NULL, NULL);
   check (err, "Failed to read buffer from GPU");
-  life_refresh_img_gottagofast();
+  life_refresh_img_bitbrd();
 
 }
 
@@ -190,7 +190,7 @@ void life_refresh_img_ocl(void){
   err = clEnqueueReadBuffer (queue, cur_buffer, CL_TRUE,offset,
                              size, _table+offset, 
                              0, NULL, NULL);
-  check (err, "Failed to read buffer from GPU");
+  //check (err, "Failed to read buffer from GPU");
   life_refresh_img();
 }
 
@@ -349,7 +349,7 @@ void life_init_ocl(void)
 
 }
 
-void life_init_gottagofast(void)
+void life_init_bitbrd(void)
 {
   ENABLE_BITCELL = 2;
   bits = sizeof(cell_t)*8;
@@ -728,7 +728,7 @@ unsigned life_compute_lazybtmpvec (unsigned nb_iter){
 return itres;
 }
 
-unsigned life_compute_gottagofast(unsigned nb_iter)
+unsigned life_compute_bitbrd(unsigned nb_iter)
 {
   unsigned x;
   unsigned y;
@@ -1091,7 +1091,7 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     gpu_accumulated_lines += gpu_y_part;
     clFinish (queue);
     //Load balancing
-    if (gpu_duration && cpu_duration) {
+    if ( gpu_duration && cpu_duration) {
       ////CPU is stealing load
       if (much_greater_than (gpu_duration, cpu_duration) &&
                             gpu_y_part > TILE_H*2) {
