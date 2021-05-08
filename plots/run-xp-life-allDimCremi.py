@@ -7,7 +7,7 @@ import os
 sizes = [512,1024,2048,4096,8192]
 #sizes = ["2176 -a otca_off -lb loadstatic","6208 -a meta3x3 -lb loadstatic"]
 itt = 25600
-nbrun = 10
+nbrun = 1
 
 for s in sizes:
     options = {}

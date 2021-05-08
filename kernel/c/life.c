@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 /////// Changer le type en unsigned pour la version en bits
-typedef unsigned cell_t;
+typedef char cell_t;
 ///////
 
 static unsigned color = 0xFFFF00FF; // Living cells have the yellow color
@@ -185,12 +185,10 @@ void life_refresh_img_ocl_bits (void){
 
 void life_refresh_img_ocl(void){
   cl_int err;
-  unsigned offset =  SIZEX * sizeof(cell_t);
-  unsigned size = DIM*SIZEX*sizeof(cell_t);
-  err = clEnqueueReadBuffer (queue, cur_buffer, CL_TRUE,offset,
-                             size, _table+offset, 
+  err = clEnqueueReadBuffer (queue, cur_buffer, CL_TRUE,0,
+                             _table_SIZE, _table, 
                              0, NULL, NULL);
-  //check (err, "Failed to read buffer from GPU");
+  check (err, "Failed to read buffer from GPU");
   life_refresh_img();
 }
 
