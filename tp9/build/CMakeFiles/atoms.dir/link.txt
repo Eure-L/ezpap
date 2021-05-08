@@ -1,1 +1,0 @@
-/usr/bin/cc   -rdynamic CMakeFiles/atoms.dir/src/main.c.o CMakeFiles/atoms.dir/src/tools.c.o  -o ../bin/atoms  -Wl,-rpath,/autofs/unitytravail/travail/vjeunehomme/pap/ezpap/tp9/build/libsotl libsotl/libsotl.so -lOpenCL -lm -lgomp -lGL -lGLU -lglut -lXmu -lXi 
