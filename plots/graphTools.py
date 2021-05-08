@@ -152,8 +152,12 @@ def easyPlotDataFrame(df, args):
         df = df.sort_values(by=args.y, ascending=False)
 
     if (args.plottype == 'lineplot'):
-        g = sns.FacetGrid(df, row=args.row, col=args.col, hue=legend, sharex='col', sharey='row',
+        g = sns.FacetGrid(df, row=args.row, col=args.col, hue=legend, 
+                          sharex=False, sharey=False, col_wrap=3, 
+                          # sharex='col', sharey='row',
                           height=args.height, margin_titles=True, legend_out=not args.legendInside, aspect=args.aspect)
+
+
         g.map(sns.lineplot, args.x, args.y, err_style="bars", marker="o")
         g.add_legend()
     elif (args.plottype == 'heatmap'):
@@ -163,7 +167,9 @@ def easyPlotDataFrame(df, args):
         g = g.map_dataframe(heatFacet, args.x, args.heaty, args.y)
     else:
         g = sns.catplot(data=df, x=args.x, y=args.y, row=args.row, col=args.col, hue=legend,
-                        kind=args.kind, sharex='col', sharey='row',
+                        kind=args.kind, 
+                        sharex=False, sharey=False, col_wrap=3, 
+                        #sharex='col', sharey='row',
                         height=args.height, margin_titles=True, legend_out=not args.legendInside, aspect=args.aspect)
 
     if args.font_scale != 1.0:
