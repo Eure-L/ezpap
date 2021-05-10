@@ -94,46 +94,6 @@ static inline char *fake_map (char * i, int x, int y)
 #define next_mapAddr(x, y) (table_map ((bitMapTls+(nextTable*NB_FAKE_TILES)), (x), (y)))
 #define next_fmapAddr(x, y) (fake_map ((bitMapTls+(nextTable*NB_FAKE_TILES)), (x), (y)))
 
-#define right 1
-#define left 2
-#define top 4
-#define topright 5
-#define topleft 6
-#define bot 8
-#define botright 9
-#define botleft 10
-#define botrightleft 11
-#define righttopbot 13
-#define lefttopbot 14
-#define rightlefttopbot 15
-
-////
-static inline bool isOnLeft(int x,int y){
-  return x > 0 && x%TILE_W == 0;
-}
-static inline bool isOnRight(int x,int y){
-  return (x<DIM-1 && (x%TILE_W == TILE_W-1));
-}
-static inline bool isOnTop(int x,int y){
-  return (y>0 && y%TILE_H==0);
-}
-static inline bool isOnBottom(int x,int y){
-  return (y<DIM-1 && (y%TILE_H == TILE_H-1));
-}
-//
-static inline unsigned isTileOnLeft(int i,int j){
-  return i == 0;
-}
-static inline unsigned isTileOnRight(int i,int j){
-  return i == NB_TILES_X-1;
-}
-static inline unsigned isTileOnTop(int i,int j){
-  return j == 0;
-}
-static inline unsigned isTileOnBottom(int i,int j){
-  return j == NB_TILES_Y-1;
-}
-////
 
 static inline void setcurBitCellRow(int i, int j, unsigned val){
   cur_table_row(j,i) = 
@@ -268,11 +228,6 @@ void setGPUborderBtmp(){
   for(int i = 0; i<NB_FAKE_X; i++){
     next_fmap(i,j+1)=1;
   }
-}
-
-unsigned tilePosition(int i, int j){
-   return top * isTileOnTop(i,j) + bot * isTileOnBottom(i,j) + 
-          left * isTileOnLeft(i,j) + right * isTileOnRight(i,j);
 }
 
 void prntAVXi( __m256i vec,char * name){
@@ -1080,8 +1035,8 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
    
     
     // CPU waiting for the GPU to finish
-    clFinish (queue);
-     //  GPU monitoring 
+    //clFinish (queue);
+    //  GPU monitoring 
     gpu_duration = ocl_monitor (kernel_event, 0, cpu_y_part, global[0],
                                 global[1], TASK_TYPE_COMPUTE);
 
@@ -1089,6 +1044,7 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     gpu_accumulated_lines += gpu_y_part;
     clFinish (queue);
     //Load balancing
+    
     if ( gpu_duration && cpu_duration) {
       ////CPU is stealing load
       if (much_greater_than (gpu_duration, cpu_duration) &&
