@@ -117,7 +117,6 @@ static inline unsigned getBitCellRow(int i, int j){
 // This function is called whenever the graphical window needs to be refreshed
 void life_refresh_img (void)
 {
-  //printf("refresh\n");
   for (int i = 0; i < DIM; i++)
     for (int j = 0; j < DIM; j++)
       cur_img (i, j) = cur_table (i, j) * color;
@@ -125,22 +124,18 @@ void life_refresh_img (void)
 
 void life_refresh_img_bitbrd (void)
 {
-  //printf("refresh bitbrd\n");
   for (int i = 0; i < DIM; i++){
     for (int j = 0; j < DIM; j++){
         cur_img (i, j) = (getBitCellRow (j, i) )* color; 
     }
   }
-  //printf("end refresh bitbrd\n");
 }
 
 void life_refresh_img_ocl_bits (void){
-
   cl_int err;
   err = clEnqueueReadBuffer (queue, cur_buffer, CL_TRUE, 0, _table_SIZE, _table, 0, NULL, NULL);
   check (err, "Failed to read buffer from GPU");
   life_refresh_img_bitbrd();
-
 }
 
 void life_refresh_img_ocl(void){
@@ -153,7 +148,6 @@ void life_refresh_img_ocl(void){
 }
 
 void life_refresh_img_ocl_hybrid (void){
-  //printf("refresh_img_ocl_hybrid\n");
 
   cl_int err;
   unsigned offset =  (cpu_y_part+1) * SIZEX;
@@ -162,10 +156,7 @@ void life_refresh_img_ocl_hybrid (void){
                              0, NULL, NULL);
   check (err, "Failed to read buffer from GPU");
   life_refresh_img();
-
-  //printf("end refresh_img_ocl_hybrid\n");
 }
-
 
 
 char * initBtmptls(void){
@@ -176,7 +167,6 @@ char * initBtmptls(void){
     exit(EXIT_FAILURE);
   }       
 
-  //int idMap;
   for (int i=0;i<NB_FAKE_TILES;i++){
     *(map+i)=0;
   }
@@ -206,23 +196,18 @@ void printBitmaps(void){
 }
 
 void deleteCurrentBtmp(){ 
-  #if 0
-  #pragma omp parallel for schedule(dynamic)
-  for(int j = 0;j<NB_TILES_Y; j++){
-    for(int i = 0; i<NB_TILES_X; i+=VEC_SIZE){
-      _mm256_storeu_si256((void*)cur_mapAddr(i,j),zero);
-    }
-  }
-  #else
+
   #pragma omp parallel for schedule(dynamic)
   for(int j = 0;j<NB_FAKE_Y; j++){
     for(int i = 0; i<NB_FAKE_X; i++){
       cur_fmap(i,j)=0;
     }
   }
-  #endif
 }
 
+/**
+ * @brief Sets the GPU border side to 1 for cpulazy evaluation
+ */
 void setGPUborderBtmp(){
   int j=cpu_y_part/TILE_H;
   for(int i = 0; i<NB_FAKE_X; i++){
@@ -230,35 +215,25 @@ void setGPUborderBtmp(){
   }
 }
 
-void prntAVXi( __m256i vec,char * name){
-  int byteSize = sizeof(char);
-  const size_t n = sizeof(__m256i) / byteSize;
-  char buffer[n];
-  _mm256_storeu_si256((void*)buffer, vec);
-  int i = 0;
-  printf("%s : ",name);
-  for (; i < 32 ; i++){
-      //if(buffer[i]!=0)
-         
-      printf("%u.",buffer[i]);
-      
-  }
-  printf(" ~ i : %d\n",i);
-}
-
 void clear_table(cell_t * table){
   for(int i =0; i<DIMTOT;i++)
     *(table+i)=0;
 }
 
+/**
+ * @brief Used to check if any adjacent tile has changed
+ * 
+ * @param i 
+ * @param j 
+ * @return true 
+ * @return false 
+ */
 static inline bool hasNeighbourChanged(unsigned i,unsigned j){
   //printf("isok\n");
   // #define cur_map(y, x) (*table_map ((bitMapTls+(curTable*NB_FAKE_TILES)), (y), (x)))
   
   return cur_map(i,j)|cur_map(i-1,j)|cur_map(i+1,j)|cur_map(i,j-1)|cur_map(i,j+1)
-  |cur_map(i-1,j-1)|cur_map(i+1,j+1)|cur_map(i+1,j-1)|cur_map(i-1,j+1);
-
-    
+  |cur_map(i-1,j-1)|cur_map(i+1,j+1)|cur_map(i+1,j-1)|cur_map(i-1,j+1);    
 }
 
 void life_init (void)
@@ -348,13 +323,38 @@ void life_init_ocl_bits(void){
 
 }
 
-
+/**
+ * @brief Called upon each end of iteration to swap tables
+ * 
+ */
 static inline void swap_tables (void)
 {
   cell_t *tmp = _table;
   switcher = !switcher;
   _table           = _alternate_table;
   _alternate_table = tmp;
+}
+
+/**
+ * @brief Prints a vector alongside its given name
+ * 
+ * @param vec 
+ * @param name 
+ */
+void prntAVXi( __m256i vec,char * name){
+  int byteSize = sizeof(char);
+  const size_t n = sizeof(__m256i) / byteSize;
+  char buffer[n];
+  _mm256_storeu_si256((void*)buffer, vec);
+  int i = 0;
+  printf("%s : ",name);
+  for (; i < 32 ; i++){
+      //if(buffer[i]!=0)
+         
+      printf("%u.",buffer[i]);
+      
+  }
+  printf(" ~ i : %d\n",i);
 }
 
 void printVecLanes(__m256i * vecLst, int topL, int midL, int botL,char * str){
@@ -629,6 +629,8 @@ static int do_tile_bitbrdvec (int x, int y, int width, int height, int who)
 
   return r;
 }
+
+
 // returns true if any thread has witnessed any change
 static bool hasAnyTileChanged(void){
   for(int i =0 ; i < 256; i ++){
@@ -681,6 +683,8 @@ unsigned life_compute_lazybtmpvec (unsigned nb_iter){
 return itres;
 }
 
+//////////////////////// Bit board Version ;
+//OMP_PLACES=cores OMP_NUM_THREADS=4 ./run -k life -s 2048 -ts 64 -v bitbrd -m
 unsigned life_compute_bitbrd(unsigned nb_iter)
 {
   unsigned x;
@@ -704,7 +708,6 @@ unsigned life_compute_bitbrd(unsigned nb_iter)
     }
     deleteCurrentBtmp();
     swap_tables ();
-    
   }
   return 0;
 }
