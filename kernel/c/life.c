@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 /////// Changer le type en unsigned pour la version en bits
-typedef char cell_t;
+typedef unsigned cell_t;
 ///////
 
 static unsigned color = 0xFFFF00FF; // Living cells have the yellow color
@@ -306,10 +306,10 @@ void life_init_bitbrd(void)
 {
   ENABLE_BITCELL = 2;
   bits = sizeof(cell_t)*8;
-  SIZEX =(DIM/bits+(2*(VEC_SIZE)));
+  SIZEX =(DIM+(2*(VEC_SIZE)))/bits;
   SIZEY =(DIM)+2;
   if (_table == NULL) {
-    const unsigned size = _table_SIZE*2;
+    const unsigned size = _table_SIZE;
     PRINT_DEBUG ('u', "Memory footprint = 2 x %d bytes\n", size);
 
     _table = mmap (NULL, size, PROT_READ | PROT_WRITE,
