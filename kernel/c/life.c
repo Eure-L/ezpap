@@ -436,7 +436,7 @@ static int do_tile_reg_vec (int x, int y, int width, int height)
   __m256i LtotVec;
   __m256i RtotVec;
 
-  // for logical operation
+  // used for logical operations
   __m256i neq3;
   __m256i meP3;
   __m256i neqMeP3;
