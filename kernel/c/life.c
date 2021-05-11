@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 /////// Changer le type en unsigned pour la version en bits
-typedef unsigned cell_t;
+typedef char cell_t;
 ///////
 
 static unsigned color = 0xFFFF00FF; // Living cells have the yellow color
@@ -442,6 +442,8 @@ static int do_tile_reg_vec (int x, int y, int width, int height)
   __m256i change;
   __m256i nVec;
 
+  __m256i tmpLines[TILE_H][width/VEC_SIZE];
+
   unsigned cnt = 0;
   
   #define toplane  ((cnt)%3)
@@ -495,7 +497,12 @@ static int do_tile_reg_vec (int x, int y, int width, int height)
       change = _mm256_xor_si256(nVec,vecTabMid[midlane]);
       nVec = _mm256_and_si256(nVec,mask1);;
 
-      _mm256_storeu_si256((void*)(next_tableAddr(j,i)),nVec);
+      // printf("j %d\n",j);
+      // printf("i %d\n",(i-x));
+      // printf("VECSIZE %d\n",VEC_SIZE);
+      // printf("indice %d\n",(i-x)/VEC_SIZE);
+      tmpLines[j-y][(i-x)/VEC_SIZE] = nVec;
+      //_mm256_storeu_si256((void*)(next_tableAddr(j,i)),nVec);
       
       bool vecChange = ! _mm256_testz_si256(_mm256_or_si256(change,_mm256_setzero_si256()), _mm256_set1_epi8(1));
       tileChange |= vecChange;
@@ -505,7 +512,11 @@ static int do_tile_reg_vec (int x, int y, int width, int height)
       vecTabLeft[toplane]=_mm256_loadu_si256((void*)(&cur_table(j+2,i-1)));
       vecTabMid[toplane]=_mm256_loadu_si256((void*)(&cur_table(j+2,i)));
       cnt++;
-
+    }
+  }
+  for(int j=0; j<TILE_H; j++){
+    for(int i=0; i<width/VEC_SIZE; i++){
+      _mm256_storeu_si256((void*)(next_tableAddr( y+j , x+i*VEC_SIZE )),tmpLines[j][i]);
     }
   }
   return tileChange;
