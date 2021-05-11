@@ -9,13 +9,15 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-/////// Changer le type en unsigned pour la version en bits
+/////// Two types of Cells, cell_tb for the one bit per cell implementation
 typedef char cell_t;
+typedef unsigned cell_tb;
 ///////
 
 static unsigned color = 0xFFFF00FF; // Living cells have the yellow color
 
 static cell_t *restrict _table = NULL, *restrict _alternate_table = NULL;
+static cell_tb *restrict b_table = NULL, *restrict b_alternate_table = NULL;
 char * bitMapTls; // Two Bit maps represented in a vector
                   // Each bits representing a tile to compute
 bool switcher = 1;
@@ -40,6 +42,7 @@ unsigned SIZEY ;
 
 
 #define _table_SIZE (SIZEX*SIZEY*sizeof(cell_t))
+#define _table_SIZEB (SIZEX*SIZEY*sizeof(cell_tb))
 #define DIMTOT (SIZEX*SIZEY)
 
 cl_mem changeBuffer;
@@ -58,7 +61,7 @@ static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
   return i + (y+1) * (DIM+VEC_SIZE*2) + (x + VEC_SIZE);
 }
 
-static inline cell_t *table_cell_row (cell_t *restrict i, int y, int x)
+static inline cell_tb *table_cell_row (cell_tb *restrict i, int y, int x)
 { 
   return i + (y+1) * (SIZEX) + (((x+bits)/bits)+VEC_SIZE);
 }
@@ -86,8 +89,8 @@ static inline char *fake_map (char * i, int x, int y)
 #define cur_mapAddr(x, y) (table_map ((bitMapTls+(curTable*NB_FAKE_TILES)), (x), (y)))
 #define cur_fmapAddr(x, y) (fake_map ((bitMapTls+(curTable*NB_FAKE_TILES)), (x), (y)))
 
-#define cur_table_row(y, x) ((*table_cell_row (_table, (y), (x))))
-#define next_table_row(y, x) (*table_cell_row (_alternate_table, (y), (x)))
+#define cur_table_row(y, x) ((*table_cell_row (b_table, (y), (x))))
+#define next_table_row(y, x) (*table_cell_row (b_alternate_table, (y), (x)))
 
 #define next_map(x, y) (*table_map ((bitMapTls+(nextTable*NB_FAKE_TILES)), (x), (y)))
 #define next_fmap(x, y) (*fake_map ((bitMapTls+(nextTable*NB_FAKE_TILES)), (x), (y)))
@@ -207,7 +210,7 @@ void deleteCurrentBtmp(){
 }
 
 /**
- * @brief Sets the GPU border side to 1 for cpulazy evaluation
+ * @brief Sets the GPU border side to 1 for cpu lazy evaluation
  */
 void setGPUborderBtmp(){
   int j=cpu_y_part/TILE_H;
@@ -262,7 +265,6 @@ void life_init (void)
 
 void life_finalize (void)
 {
-  // printf("finalize\n");
   const unsigned size = _table_SIZE;
 
   munmap (_table, size);
@@ -283,23 +285,34 @@ void life_init_ocl(void)
 void life_init_bitbrd(void)
 {
   ENABLE_BITCELL = 2;
-  bits = sizeof(cell_t)*8;
+  bits = sizeof(cell_tb)*8;
   SIZEX =(DIM+(2*(VEC_SIZE)))/bits;
   SIZEY =(DIM)+2;
-  if (_table == NULL) {
-    const unsigned size = _table_SIZE;
+  if (b_table == NULL) {
+    const unsigned size = _table_SIZEB;
     PRINT_DEBUG ('u', "Memory footprint = 2 x %d bytes\n", size);
 
-    _table = mmap (NULL, size, PROT_READ | PROT_WRITE,
+    b_table = mmap (NULL, size, PROT_READ | PROT_WRITE,
                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0 );
 
-    _alternate_table = mmap (NULL, size, PROT_READ | PROT_WRITE,
+    b_alternate_table = mmap (NULL, size, PROT_READ | PROT_WRITE,
                              MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   }
   if(bitMapTls==NULL)
     bitMapTls = initBtmptls(); 
+  //clear_table(b_table);
+}
+
+void life_finalize_bitbrd (void)
+{
+  // printf("finalize\n");
+  const unsigned size = _table_SIZEB;
+
+  munmap (b_table, size);
+  munmap (b_alternate_table, size);
   
-  clear_table(_table);
+  if(bitMapTls!=NULL)
+    free(bitMapTls);
 }
 
 void life_init_ocl_bits(void){
@@ -336,6 +349,14 @@ static inline void swap_tables (void)
   switcher = !switcher;
   _table           = _alternate_table;
   _alternate_table = tmp;
+}
+
+static inline void swap_tablesb (void)
+{
+  cell_tb *tmp = b_table;
+  switcher = !switcher;
+  b_table           = b_alternate_table;
+  b_alternate_table = tmp;
 }
 
 /**
@@ -527,20 +548,20 @@ static int do_tile_vec (int x, int y, int width, int height, int who)
 ///// Bitbrd Kernel, must be caled with cell_t of type unsigned
 static int do_tile_reg_bitbrd(int x, int y, int width, int height)
 { 
-  cell_t vecTabLeft[3];
-  cell_t vecTabMid[3];
-  cell_t vecTabRight[3];
-  cell_t s2;
-  cell_t s3;
-  cell_t a,b,c,d,e,f,g,h;
-  cell_t X;
-  cell_t XAB;
-  cell_t XCD;
-  cell_t XEF;
-  cell_t XGH;
+  cell_tb vecTabLeft[3];
+  cell_tb vecTabMid[3];
+  cell_tb vecTabRight[3];
+  cell_tb s2;
+  cell_tb s3;
+  cell_tb a,b,c,d,e,f,g,h;
+  cell_tb X;
+  cell_tb XAB;
+  cell_tb XCD;
+  cell_tb XEF;
+  cell_tb XGH;
 
-  cell_t change = false;
-  cell_t res;
+  cell_tb change = false;
+  cell_tb res;
 
   unsigned cnt = 0;
   
@@ -708,7 +729,7 @@ unsigned life_compute_bitbrd(unsigned nb_iter)
       }
     }
     deleteCurrentBtmp();
-    swap_tables ();
+    swap_tablesb ();
   }
   return 0;
 }
