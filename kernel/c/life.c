@@ -465,9 +465,9 @@ static int do_tile_reg_vec (int x, int y, int width, int height)
     vecTabRight[midlane] = _mm256_loadu_si256((void*)(&cur_table(j,i+1)));
     vecTabRight[botlane] = _mm256_loadu_si256((void*)(&cur_table(j+1,i+1)));
 
-    vecTabMid[toplane] = _mm256_loadu_si256((void*)(&cur_table(j-1,i)));
-    vecTabMid[midlane] = _mm256_loadu_si256((void*)(&cur_table(j,i)));
-    vecTabMid[botlane] = _mm256_loadu_si256((void*)(&cur_table(j+1,i)));
+    vecTabMid[toplane] = _mm256_load_si256((void*)(&cur_table(j-1,i)));
+    vecTabMid[midlane] = _mm256_load_si256((void*)(&cur_table(j,i)));
+    vecTabMid[botlane] = _mm256_load_si256((void*)(&cur_table(j+1,i)));
     
     for ( j = y; j < y + height; j++){
       MtotVec = _mm256_add_epi8(\
@@ -498,7 +498,7 @@ static int do_tile_reg_vec (int x, int y, int width, int height)
       nVec = _mm256_and_si256(nVec,mask1);;
 
 
-      _mm256_storeu_si256((void*)(next_tableAddr(j,i)),nVec);
+      _mm256_store_si256((void*)(next_tableAddr(j,i)),nVec);
       
       bool vecChange = ! _mm256_testz_si256(_mm256_or_si256(change,_mm256_setzero_si256()), _mm256_set1_epi8(1));
       tileChange |= vecChange;
@@ -506,7 +506,7 @@ static int do_tile_reg_vec (int x, int y, int width, int height)
       // Rolling the roles
       vecTabRight[toplane]=_mm256_loadu_si256((void*)(&cur_table(j+2,i+1)));
       vecTabLeft[toplane]=_mm256_loadu_si256((void*)(&cur_table(j+2,i-1)));
-      vecTabMid[toplane]=_mm256_loadu_si256((void*)(&cur_table(j+2,i)));
+      vecTabMid[toplane]=_mm256_load_si256((void*)(&cur_table(j+2,i)));
       cnt++;
     }
   }
@@ -694,7 +694,7 @@ unsigned life_compute_bitbrd(unsigned nb_iter)
   unsigned res;
   unsigned it = 1;
   for (; it <= nb_iter; it++) {
-    #pragma omp parallel for schedule(dynamic) private(res,x,y,who)
+    #pragma omp parallel for schedule(dynamic) collapse(1)private(res,x,y,who)
     for (int i = 0; i < NB_TILES_Y; i++){
       for (int j = 0; j < NB_TILES_X; j++){
         if(hasNeighbourChanged(j,i)){
