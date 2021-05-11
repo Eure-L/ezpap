@@ -918,7 +918,7 @@ void life_init_ocl_hybrid(void){
     exit_with_error ("CPU and GPU Tiles should have the same height (%d != %d)",
                     GPU_TILE_H, TILE_H);
 
-  cpu_y_part = ((NB_TILES_Y*1) / 10) * GPU_TILE_H; // Start with sixty-fourty
+  cpu_y_part = ((NB_TILES_Y*5) / 10) * GPU_TILE_H; // Start with sixty-fourty
   gpu_y_part = DIM - cpu_y_part;
 
 }
@@ -980,20 +980,22 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
     }
     t2           = what_time_is_it ();
     cpu_duration = t2 - t1;
+    gpu_accumulated_lines += gpu_y_part;
 
    
     
-    // CPU waiting for the GPU to finish
     //clFinish (queue);
+    
+    //clReleaseEvent (kernel_event);
+
+    // CPU waiting for the GPU to finish
+    clFinish (queue);
+   
     //  GPU monitoring 
     gpu_duration = ocl_monitor (kernel_event, 0, cpu_y_part, global[0],
                                 global[1], TASK_TYPE_COMPUTE);
-
-    clReleaseEvent (kernel_event);
-    gpu_accumulated_lines += gpu_y_part;
-    clFinish (queue);
-    //Load balancing
     
+    //Load balancing
     if ( gpu_duration && cpu_duration) {
       ////CPU is stealing load
       if (much_greater_than (gpu_duration, cpu_duration) &&
