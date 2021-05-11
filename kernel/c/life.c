@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 /////// Changer le type en unsigned pour la version en bits
-typedef unsigned cell_t;
+typedef char cell_t;
 ///////
 
 static unsigned color = 0xFFFF00FF; // Living cells have the yellow color
@@ -21,7 +21,7 @@ char * bitMapTls; // Two Bit maps represented in a vector
 bool switcher = 1;
 __m256i mask1;
 __m256i zero;
-char threadChange[256];
+char threadChange[64];
 
 #define AVXBITS 256
 #define VEC_SIZE (AVXBITS/(sizeof(cell_t)*8))
@@ -49,7 +49,7 @@ cl_event transfert_event;
 
 static unsigned cpu_y_part;
 static unsigned gpu_y_part;
-// Threashold
+// Threshold
 #define THRESHOLD 10
 
 static inline cell_t *table_cell (cell_t *restrict i, int y, int x)
@@ -114,7 +114,8 @@ static inline unsigned getBitCellRow(int i, int j){
   return (cur_table_row(j,i)>>((i)%bits)&(0x01));
 }
 
-// This function is called whenever the graphical window needs to be refreshed
+//////// refresh_img functions
+// These functions are called whenever the graphical window needs to be refreshed
 void life_refresh_img (void)
 {
   for (int i = 0; i < DIM; i++)
@@ -158,7 +159,7 @@ void life_refresh_img_ocl_hybrid (void){
   life_refresh_img();
 }
 
-
+////// Auxilliary functions needed at Init time
 char * initBtmptls(void){
   
   char * map = (char *) malloc ((2 * (NB_FAKE_TILES) * sizeof(char)));
@@ -236,6 +237,8 @@ static inline bool hasNeighbourChanged(unsigned i,unsigned j){
   |cur_map(i-1,j-1)|cur_map(i+1,j+1)|cur_map(i+1,j-1)|cur_map(i-1,j+1);    
 }
 
+
+//////// Init functions
 void life_init (void)
 {
   SIZEX =(DIM+(VEC_SIZE*2));
@@ -419,8 +422,7 @@ static int do_tile (int x, int y, int width, int height, int who)
 }
 
 
-/////////////////////////////////////////// vectorial version
-
+/////////////////////////////////////////// vectorial Kernel
 //must be called on tiles of width's sizes multiple of 32
 static int do_tile_reg_vec (int x, int y, int width, int height)
 {
@@ -441,8 +443,6 @@ static int do_tile_reg_vec (int x, int y, int width, int height)
 
   __m256i change;
   __m256i nVec;
-
-  __m256i tmpLines[TILE_H][width/VEC_SIZE];
 
   unsigned cnt = 0;
   
@@ -497,12 +497,8 @@ static int do_tile_reg_vec (int x, int y, int width, int height)
       change = _mm256_xor_si256(nVec,vecTabMid[midlane]);
       nVec = _mm256_and_si256(nVec,mask1);;
 
-      // printf("j %d\n",j);
-      // printf("i %d\n",(i-x));
-      // printf("VECSIZE %d\n",VEC_SIZE);
-      // printf("indice %d\n",(i-x)/VEC_SIZE);
-      tmpLines[j-y][(i-x)/VEC_SIZE] = nVec;
-      //_mm256_storeu_si256((void*)(next_tableAddr(j,i)),nVec);
+
+      _mm256_storeu_si256((void*)(next_tableAddr(j,i)),nVec);
       
       bool vecChange = ! _mm256_testz_si256(_mm256_or_si256(change,_mm256_setzero_si256()), _mm256_set1_epi8(1));
       tileChange |= vecChange;
@@ -512,11 +508,6 @@ static int do_tile_reg_vec (int x, int y, int width, int height)
       vecTabLeft[toplane]=_mm256_loadu_si256((void*)(&cur_table(j+2,i-1)));
       vecTabMid[toplane]=_mm256_loadu_si256((void*)(&cur_table(j+2,i)));
       cnt++;
-    }
-  }
-  for(int j=0; j<TILE_H; j++){
-    for(int i=0; i<width/VEC_SIZE; i++){
-      _mm256_storeu_si256((void*)(next_tableAddr( y+j , x+i*VEC_SIZE )),tmpLines[j][i]);
     }
   }
   return tileChange;
@@ -533,6 +524,7 @@ static int do_tile_vec (int x, int y, int width, int height, int who)
   return r;
 }
 
+///// Bitbrd Kernel, must be caled with cell_t of type unsigned
 static int do_tile_reg_bitbrd(int x, int y, int width, int height)
 { 
   cell_t vecTabLeft[3];
@@ -550,8 +542,6 @@ static int do_tile_reg_bitbrd(int x, int y, int width, int height)
   cell_t change = false;
   cell_t res;
 
-  cell_t tmpLines[TILE_H][width/bits];
-
   unsigned cnt = 0;
   
   #define toplane  ((cnt)%3)
@@ -560,7 +550,6 @@ static int do_tile_reg_bitbrd(int x, int y, int width, int height)
   
   unsigned i = x;
   
-
   for (i = x; i < x + width; i+= bits){
 
     unsigned j = y;
@@ -617,8 +606,7 @@ static int do_tile_reg_bitbrd(int x, int y, int width, int height)
 
       res =  (s3 |  (vecTabMid[midlane] & s2));
 
-      tmpLines[j-y][(i-x)/bits] = res;
-      //next_table_row(j,i) = res;
+      next_table_row(j,i) = res;
 
       change |= !(vecTabMid[midlane] == res);
 
@@ -626,11 +614,6 @@ static int do_tile_reg_bitbrd(int x, int y, int width, int height)
       vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((getBitCellRow(i+bits,j+2)<<(bits-1)));
       vecTabLeft[toplane]  = (vecTabMid[toplane]<<1)|(getBitCellRow(i-1,j+2));
       cnt++;
-    }
-  }
-  for(int j=0; j<TILE_H; j++){
-    for(int i=0; i<width/VEC_SIZE; i++){
-      next_table_row(j+y,x+i*bits) = tmpLines[j][i];
     }
   }
   return change;
@@ -650,9 +633,9 @@ static int do_tile_bitbrdvec (int x, int y, int width, int height, int who)
 }
 
 
-// returns true if any thread has witnessed any change
-static bool hasAnyTileChanged(void){
-  for(int i =0 ; i < 256; i ++){
+// Checks if any thread has witnessed any change
+static bool hasAnyTileChanged(){
+  for(int i =0 ; i < 64; i ++){
     if(threadChange[i]){
       return true;
     }
@@ -660,10 +643,8 @@ static bool hasAnyTileChanged(void){
   return false;
 }
 
-//////////////////////// BitMap2 lazy vectorial Version ;
-//OMP_PLACES=cores OMP_NUM_THREADS=1 ./run -k life -s 2048 -ts 64 -v lazybtmpvec -m
-//OMP_PLACES=cores OMP_NUM_THREADS=1 ./run -k life -a random -s 2048 -ts 32 -v lazybtmpvec -m
-//OMP_PLACES=cores OMP_NUM_THREADS=4 ./run -k life -a otca_off -s 2176 -ts 64 -v lazybtmpvec -m
+//////////////////////// lazy vectorial Version ;
+//OMP_PLACES=cores OMP_NUM_THREADS=4 ./run -k life -s 2048 -ts 64 -v lazybtmpvec -m
 
 
 unsigned life_compute_lazybtmpvec (unsigned nb_iter){ 
@@ -678,7 +659,7 @@ unsigned life_compute_lazybtmpvec (unsigned nb_iter){
 
     #pragma omp parallel for schedule(dynamic) private(res,x,y,who)
     for(int j = 0; j< NB_TILES_Y ;j++){ 
-      for(int i = 0; i< NB_FAKE_X  ;i++){
+      for(int i = 0; i< NB_TILES_X  ;i++){
 
         if(hasNeighbourChanged(i,j)){
           x=i * TILE_W;
@@ -698,6 +679,7 @@ unsigned life_compute_lazybtmpvec (unsigned nb_iter){
       printf("there's no future tasks\n");
       //break;
     }
+
   }
 return itres;
 }
@@ -731,7 +713,7 @@ unsigned life_compute_bitbrd(unsigned nb_iter)
   return 0;
 }
 
-
+//Same use as swap_tables, called at each end of itteration
 static inline void swap_buffers(void)
 { 
   cl_mem tmp1 = curbitMapBuffer;
@@ -795,67 +777,10 @@ unsigned life_invoke_ocl (unsigned nb_iter)
   return 0;
 }
 
-unsigned life_invoke_ocl_bits(unsigned nb_iter){
-
-  size_t global[2] = {(DIM/bits),(DIM)};
-
-  cl_int err; 
-  err = clEnqueueWriteBuffer(queue, cur_buffer, CL_TRUE, 0, _table_SIZE, _table, 0, NULL, NULL);
-  check (err, "Failed to write buffer to GPU");
-
-  bool gpuChange = False;
-                
-  monitoring_start_tile (easypap_gpu_lane (TASK_TYPE_COMPUTE));
-
-  for (unsigned it = 1; it <= nb_iter; it++) {
-    gpuChange = False;
-    err = 0;
-
-    // Modifies the buffer
-    err =clEnqueueWriteBuffer (queue, cur_buffer, CL_TRUE, 0,
-            _table_SIZE, _table, 0, NULL,NULL);
-
-    err =clEnqueueWriteBuffer (queue, changeBuffer, CL_TRUE, 0,
-             sizeof (unsigned int), &gpuChange, 0, NULL,NULL); 
-    check (err, "Failed to write the buffer");
-
-    // Sets Kernel arguments
-    err |= clSetKernelArg (compute_kernel, 0,  sizeof (cl_mem), &cur_buffer);
-    err |= clSetKernelArg (compute_kernel, 1,  sizeof (cl_mem), &next_buffer);
-    err |= clSetKernelArg (compute_kernel, 2,  sizeof (cl_mem), &changeBuffer);
-    check (err, "Failed to set kernel arguments");
-
-    // Launches GPU kernel
-    err = clEnqueueNDRangeKernel (queue, compute_kernel, 2, NULL, global, NULL,
-                                  0, NULL, NULL);
-    check (err, "Failed to execute kernel");
-
-    // Retrieves the Buffer
-    err = clEnqueueReadBuffer(queue, changeBuffer, CL_TRUE, 0, sizeof(unsigned),
-          &gpuChange, 0, NULL, NULL);
-
-    err = clEnqueueReadBuffer (queue, cur_buffer, CL_TRUE, 0, _table_SIZE, _table, 0, NULL, NULL);
-    check (err, "Failed to read buffer from GPU");
-    //check (err, "Failed to Read the buffer");
-
-    if(false)
-      return it;
-
-    swap_buffers();
-    swap_tables();
-  }
-
-  clFinish (queue);
-
-  monitoring_end_tile (0, 0, DIM, DIM, easypap_gpu_lane (TASK_TYPE_COMPUTE));
-
-  return 0;
-
-}
-
-
 
 static long gpu_duration = 0, cpu_duration = 0;
+
+//Auxilliary functions for OCL Hybrid version
 
 
 static int much_greater_than (long t1, long t2)
@@ -863,6 +788,7 @@ static int much_greater_than (long t1, long t2)
   return (t1 > t2) && ((t1 - t2) * 100 / t1 > THRESHOLD);
 }
 
+//macro for clEnqueueWriteBuffer
 static cl_int nqWrtBuf(unsigned offset, unsigned size, cl_mem * buffer, cell_t * ptr){
   return clEnqueueWriteBuffer (queue, *buffer, CL_TRUE, 
                                   offset,                 //offset write buffer
@@ -872,6 +798,7 @@ static cl_int nqWrtBuf(unsigned offset, unsigned size, cl_mem * buffer, cell_t *
                                   NULL, &transfert_event);
 }
 
+//macro for clEnqueueReadBuffer
 static cl_int nqRdBuf(unsigned offset, unsigned size, cl_mem * buffer, cell_t * ptr){
   return clEnqueueReadBuffer (queue, *buffer, CL_TRUE, 
                                   offset,                 //offset 
@@ -880,6 +807,7 @@ static cl_int nqRdBuf(unsigned offset, unsigned size, cl_mem * buffer, cell_t * 
                                   0,
                                   NULL, &transfert_event);
 }
+
 
 static void cpu_write_all(){
   cl_int err;
@@ -990,12 +918,10 @@ void life_init_ocl_hybrid(void){
     exit_with_error ("CPU and GPU Tiles should have the same height (%d != %d)",
                     GPU_TILE_H, TILE_H);
 
-  cpu_y_part = ((NB_TILES_Y*4) / 10) * GPU_TILE_H; // Start with sixty-fourty
+  cpu_y_part = ((NB_TILES_Y*1) / 10) * GPU_TILE_H; // Start with sixty-fourty
   gpu_y_part = DIM - cpu_y_part;
 
 }
-
-
 
 unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
 {
@@ -1013,6 +939,7 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
   unsigned who;
   unsigned res;
   long t1,t2;
+
   for (unsigned it = 1; it <= nb_iter; it++) {
     
     gpuChange = False;
@@ -1113,6 +1040,67 @@ unsigned life_invoke_ocl_hybrid (unsigned nb_iter)
 
   return 0;
 }
+
+
+// Work in progress
+unsigned life_invoke_ocl_bits(unsigned nb_iter){
+
+  size_t global[2] = {(DIM/bits),(DIM)};
+
+  cl_int err; 
+  err = clEnqueueWriteBuffer(queue, cur_buffer, CL_TRUE, 0, _table_SIZE, _table, 0, NULL, NULL);
+  check (err, "Failed to write buffer to GPU");
+
+  bool gpuChange = False;
+                
+  monitoring_start_tile (easypap_gpu_lane (TASK_TYPE_COMPUTE));
+
+  for (unsigned it = 1; it <= nb_iter; it++) {
+    gpuChange = False;
+    err = 0;
+
+    // Modifies the buffer
+    err =clEnqueueWriteBuffer (queue, cur_buffer, CL_TRUE, 0,
+            _table_SIZE, _table, 0, NULL,NULL);
+
+    err =clEnqueueWriteBuffer (queue, changeBuffer, CL_TRUE, 0,
+             sizeof (unsigned int), &gpuChange, 0, NULL,NULL); 
+    check (err, "Failed to write the buffer");
+
+    // Sets Kernel arguments
+    err |= clSetKernelArg (compute_kernel, 0,  sizeof (cl_mem), &cur_buffer);
+    err |= clSetKernelArg (compute_kernel, 1,  sizeof (cl_mem), &next_buffer);
+    err |= clSetKernelArg (compute_kernel, 2,  sizeof (cl_mem), &changeBuffer);
+    check (err, "Failed to set kernel arguments");
+
+    // Launches GPU kernel
+    err = clEnqueueNDRangeKernel (queue, compute_kernel, 2, NULL, global, NULL,
+                                  0, NULL, NULL);
+    check (err, "Failed to execute kernel");
+
+    // Retrieves the Buffer
+    err = clEnqueueReadBuffer(queue, changeBuffer, CL_TRUE, 0, sizeof(unsigned),
+          &gpuChange, 0, NULL, NULL);
+
+    err = clEnqueueReadBuffer (queue, cur_buffer, CL_TRUE, 0, _table_SIZE, _table, 0, NULL, NULL);
+    check (err, "Failed to read buffer from GPU");
+    //check (err, "Failed to Read the buffer");
+
+    if(false)
+      return it;
+
+    swap_buffers();
+    swap_tables();
+  }
+
+  clFinish (queue);
+
+  monitoring_end_tile (0, 0, DIM, DIM, easypap_gpu_lane (TASK_TYPE_COMPUTE));
+
+  return 0;
+
+}
+
 
 ///////////////////////////// Initial configs
 
