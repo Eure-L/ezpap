@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 /////// Changer le type en unsigned pour la version en bits
-typedef char cell_t;
+typedef unsigned cell_t;
 ///////
 
 static unsigned color = 0xFFFF00FF; // Living cells have the yellow color
@@ -550,6 +550,8 @@ static int do_tile_reg_bitbrd(int x, int y, int width, int height)
   cell_t change = false;
   cell_t res;
 
+  cell_t tmpLines[TILE_H][width/bits];
+
   unsigned cnt = 0;
   
   #define toplane  ((cnt)%3)
@@ -615,7 +617,8 @@ static int do_tile_reg_bitbrd(int x, int y, int width, int height)
 
       res =  (s3 |  (vecTabMid[midlane] & s2));
 
-      next_table_row(j,i) = res;
+      tmpLines[j-y][(i-x)/bits] = res;
+      //next_table_row(j,i) = res;
 
       change |= !(vecTabMid[midlane] == res);
 
@@ -623,6 +626,11 @@ static int do_tile_reg_bitbrd(int x, int y, int width, int height)
       vecTabRight[toplane] = (vecTabMid[toplane]>>1)|((getBitCellRow(i+bits,j+2)<<(bits-1)));
       vecTabLeft[toplane]  = (vecTabMid[toplane]<<1)|(getBitCellRow(i-1,j+2));
       cnt++;
+    }
+  }
+  for(int j=0; j<TILE_H; j++){
+    for(int i=0; i<width/VEC_SIZE; i++){
+      next_table_row(j+y,x+i*bits) = tmpLines[j][i];
     }
   }
   return change;
